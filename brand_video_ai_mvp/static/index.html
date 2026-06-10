@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brand Video AI MVP</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div>
+        <p class="eyebrow">AI Brand Video Generator · MVP</p>
+        <h1>品牌 TikTok 短视频脚本 & 视频 Prompt 生成器</h1>
+        <p class="subtitle">
+          填写品牌问卷后，AI 自动生成视频大纲。人工审查修改后，再生成适配 Runway / Kling / Pika 的英文视频生成 Prompt。
+        </p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="card">
+        <div class="section-header">
+          <span class="step">Step 1</span>
+          <h2>品牌问卷输入</h2>
+        </div>
+
+        <form id="questionnaireForm" class="form-grid">
+          <label>
+            品牌名称
+            <input id="brandName" required value="Luna Bloom" placeholder="例如：Luna Bloom" />
+          </label>
+
+          <label>
+            行业 / 业务类型
+            <input id="industry" required value="自然灵感首饰品牌" placeholder="例如：咖啡店 / 珠宝 / 健身房" />
+          </label>
+
+          <label>
+            目标受众
+            <input id="targetAudience" required value="喜欢自然、可持续生活方式的年轻女性消费者" placeholder="例如：18-30 岁学生和年轻上班族" />
+          </label>
+
+          <label>
+            品牌关键词（3个形容词，用逗号分隔）
+            <input id="brandKeywords" value="优雅,自然,可持续" placeholder="例如：高级,年轻,环保" />
+          </label>
+
+          <label>
+            近期推广主题或活动
+            <input id="promotionTheme" required value="春季新品上线，首单九折" placeholder="例如：新品发布 / 节日折扣 / 开业活动" />
+          </label>
+
+          <label>
+            视频时长
+            <select id="videoLength">
+              <option value="15 seconds">15 秒</option>
+              <option value="15-30 seconds" selected>15-30 秒</option>
+              <option value="30 seconds">30 秒</option>
+            </select>
+          </label>
+
+          <button type="submit" id="generateOutlineButton">生成视频大纲</button>
+        </form>
+      </section>
+
+      <section class="card" id="outlineSection" hidden>
+        <div class="section-header">
+          <span class="step">Step 2</span>
+          <h2>人工审查视频大纲</h2>
+        </div>
+
+        <div id="outlineMeta" class="notice"></div>
+
+        <label>
+          Hook（前3秒开场）
+          <textarea id="hookInput" rows="2"></textarea>
+        </label>
+
+        <label>
+          视频结构概述
+          <textarea id="summaryInput" rows="3"></textarea>
+        </label>
+
+        <div class="inline-title">
+          <h3>分镜场景</h3>
+          <span>可以直接修改每个场景描述和字幕</span>
+        </div>
+        <div id="scenesContainer" class="scenes"></div>
+
+        <label>
+          完整配音 / 字幕文案
+          <textarea id="voiceoverInput" rows="4"></textarea>
+        </label>
+
+        <label>
+          推荐背景音乐风格
+          <input id="musicInput" />
+        </label>
+
+        <label>
+          TikTok Hashtags（用逗号分隔）
+          <input id="hashtagsInput" />
+        </label>
+
+        <label>
+          创意备注
+          <textarea id="notesInput" rows="3"></textarea>
+        </label>
+
+        <label>
+          目标视频工具
+          <select id="targetTool">
+            <option>Generic</option>
+            <option>Runway Gen-3</option>
+            <option>Kling</option>
+            <option>Pika</option>
+          </select>
+        </label>
+
+        <div class="actions">
+          <button id="approveButton">通过并生成视频 Prompt</button>
+          <button id="regenerateButton" class="secondary">重新生成大纲</button>
+        </div>
+      </section>
+
+      <section class="card" id="promptSection" hidden>
+        <div class="section-header">
+          <span class="step">Step 3</span>
+          <h2>视频生成 Prompt & 视频片段生成</h2>
+        </div>
+
+        <div class="tool-row">
+          <button id="copyPromptsButton" class="secondary" type="button">复制全部 Prompt</button>
+          <span class="muted">生成 Prompt 后，每个 Scene 下方会出现“生成这个 Scene 的视频片段”按钮。</span>
+        </div>
+
+        <div id="promptMeta" class="notice"></div>
+        <div id="promptsContainer" class="prompts"></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="/static/app.js?v=video-button"></script>
+  </body>
+</html>

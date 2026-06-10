@@ -320,3 +320,60 @@ button.secondary:hover {
 .generate-video-button {
   margin-top: 4px;
 }
+
+/* Bilingual UI additions */
+.hero-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.hero-copy {
+  flex: 1;
+}
+
+.language-switcher {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.language-switcher label {
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.language-switcher select {
+  min-width: 120px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  background: white;
+  color: var(--text);
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .hero-inner {
+    flex-direction: column;
+  }
+
+  .language-switcher {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .language-switcher select {
+    max-width: 180px;
+  }
+}

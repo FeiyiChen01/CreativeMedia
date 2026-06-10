@@ -70,7 +70,7 @@ class ReviewOutlineRequest(BaseModel):
 
     questionnaire: BrandQuestionnaire
     outline: VideoOutline
-    target_tool: Literal["Runway Gen-3", "Kling", "Pika", "Generic"] = "Generic"
+    target_tool: Literal["sora-2"] = "sora-2"
 
 
 class ScenePrompt(BaseModel):
@@ -84,7 +84,7 @@ class ScenePrompt(BaseModel):
 class VideoPromptPackage(BaseModel):
     """Final prompt package for video generation tools."""
 
-    platform: Literal["Runway Gen-3", "Kling", "Pika", "Generic"]
+    platform: Literal["sora-2"]
     aspect_ratio: str = "vertical 9:16"
     global_style_prompt_en: str
     scene_prompts: list[ScenePrompt]
@@ -94,6 +94,8 @@ class VideoPromptPackage(BaseModel):
 class GeneratePromptsResponse(BaseModel):
     prompt_package: VideoPromptPackage
     source: Literal["openai", "mock"]
+
+
 
 class GenerateSceneVideoRequest(BaseModel):
     """Request body for generating one video clip from one scene prompt."""
@@ -111,4 +113,3 @@ class GenerateSceneVideoResponse(BaseModel):
     model: str
     size: str
     seconds: str
-

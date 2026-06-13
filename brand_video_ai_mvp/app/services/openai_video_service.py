@@ -6,6 +6,8 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
+from app.services.storage_service import VideoStorageService
+
 try:
     from openai import OpenAI
 except ImportError:
@@ -30,7 +32,7 @@ class OpenAIVideoService:
         self.poll_interval_seconds = float(os.getenv("VIDEO_POLL_INTERVAL_SECONDS", "5"))
         self.timeout_seconds = int(os.getenv("VIDEO_TIMEOUT_SECONDS", "600"))
         self.output_dir = output_dir
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.storage = VideoStorageService(base_dir=output_dir)
 
         if not self.api_key or self.api_key.startswith("sk-your"):
             raise VideoGenerationError("OPENAI_API_KEY is missing. Add it to .env before generating videos.")
@@ -58,15 +60,17 @@ class OpenAIVideoService:
 
             completed_video = self._wait_until_done(video.id)
             file_name = f"{completed_video.id}_{uuid.uuid4().hex[:8]}.mp4"
-            output_path = self.output_dir / file_name
 
             video_content = self.client.videos.download_content(video_id=completed_video.id)
-            output_path.write_bytes(video_content.read())
+            storage_metadata = self.storage.save_video_file(video_content.read(), file_name=file_name)
 
             return {
                 "video_id": completed_video.id,
                 "status": completed_video.status,
-                "video_url": f"/static/generated_videos/{file_name}",
+                "video_url": str(storage_metadata["video_url"]),
+                "file_path": str(storage_metadata["file_path"]),
+                "storage_backend": str(storage_metadata["storage_backend"]),
+                "file_size": str(storage_metadata["file_size"]),
                 "model": model,
                 "size": size,
                 "seconds": seconds,

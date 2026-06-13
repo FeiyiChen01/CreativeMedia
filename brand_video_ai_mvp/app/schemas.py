@@ -1,13 +1,16 @@
 """Pydantic schemas for authentication, questionnaire, and social accounts."""
 
 from datetime import datetime
-from typing import Any, Literal
+import re
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
 class UserRegister(BaseModel):
     """Request body for registering a new user."""
+
+    USERNAME_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_.@-]+$")
 
     email: EmailStr
     username: str = Field(..., min_length=3, max_length=100)
@@ -17,13 +20,13 @@ class UserRegister(BaseModel):
     @field_validator("username")
     @classmethod
     def validate_username(cls, value: str) -> str:
-        """Allow simple usernames that are safe to display and query."""
+        """Allow email-style usernames while blocking whitespace and unsafe symbols."""
 
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("Username cannot be empty.")
-        if not cleaned.replace("_", "").replace("-", "").isalnum():
-            raise ValueError("Username can only contain letters, numbers, underscores, and hyphens.")
+        if not cls.USERNAME_PATTERN.fullmatch(cleaned):
+            raise ValueError("Username can only contain letters, numbers, underscores, hyphens, @, and periods.")
         return cleaned
 
     @field_validator("password")
@@ -328,10 +331,13 @@ class VideoAssetResponse(BaseModel):
     id: int
     user_id: int
     generation_job_id: int
+    prompt_package_id: int | None = None
     scene_number: int | None = None
     provider_video_id: str | None = None
+    storage_backend: str | None = None
     video_url: str | None = None
     file_path: str | None = None
+    file_size: int | None = None
     model: str | None = None
     size: str | None = None
     seconds: float | None = None

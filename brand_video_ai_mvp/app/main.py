@@ -81,6 +81,7 @@ from app.schemas import (
 from app.services.email_service import EmailService
 from app.services.openai_service import AIServiceError, BrandVideoAIService
 from app.services.openai_video_service import OpenAIVideoService, VideoGenerationError
+from app.services.storage_service import VideoStorageService
 
 load_dotenv()
 
@@ -120,6 +121,14 @@ def get_app_base_url() -> str:
     """Return public app base URL for account links."""
 
     return os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+def get_local_video_storage_dir() -> Path:
+    """Return the local video storage directory, resolving relative env paths."""
+
+    configured_dir = os.getenv("LOCAL_VIDEO_STORAGE_DIR", "static/generated_videos").strip()
+    path = Path(configured_dir)
+    return path if path.is_absolute() else BASE_DIR / path
 
 
 def utc_now() -> datetime:
@@ -168,10 +177,78 @@ def parse_json_text(value: str | None) -> object | None:
         return value
 
 
+def json_safe(value: object) -> object:
+    """Convert nested validation details into JSON-serializable values."""
+
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def source_provider(source: str) -> str:
     """Normalize provider values for constrained job records."""
 
     return "openai" if source == "openai" else "mock"
+
+
+def get_latest_questionnaire(db: Session, user_id: int) -> Questionnaire | None:
+    """Return the latest questionnaire for relationship tracking."""
+
+    return db.scalar(
+        select(Questionnaire)
+        .where(Questionnaire.user_id == user_id)
+        .order_by(Questionnaire.updated_at.desc(), Questionnaire.id.desc())
+    )
+
+
+def resolve_questionnaire_id(db: Session, user_id: int, questionnaire_id: int | None = None) -> int | None:
+    """Use an explicit questionnaire id when owned by the user, otherwise the latest one."""
+
+    if questionnaire_id:
+        questionnaire = db.get(Questionnaire, questionnaire_id)
+        if questionnaire and questionnaire.user_id == user_id:
+            return questionnaire.id
+    latest_questionnaire = get_latest_questionnaire(db, user_id)
+    return latest_questionnaire.id if latest_questionnaire else None
+
+
+def create_api_usage_log(
+    db: Session,
+    operation: str,
+    provider: str,
+    model: str | None,
+    generation_job_id: int | None = None,
+    user_id: int | None = None,
+    latency_ms: int | None = None,
+    estimated_cost: float | Decimal | None = 0,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+) -> None:
+    """Persist a provider usage row for admin cost visibility.
+
+    Token and cost calculation is intentionally stubbed at zero until real
+    provider usage metadata is wired in.
+    """
+
+    db.add(
+        ApiUsageLog(
+            user_id=user_id,
+            generation_job_id=generation_job_id,
+            provider=provider,
+            model=model or "unknown",
+            operation=operation,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated_cost=estimated_cost if estimated_cost is not None else Decimal("0"),
+            latency_ms=latency_ms,
+        )
+    )
 
 
 def send_verification_for_user(user: User, db: Session) -> str:
@@ -284,7 +361,7 @@ async def validation_exception_handler(_request: Request, exc: RequestValidation
         content={
             "detail": "Invalid request body.",
             "error_code": "VALIDATION_ERROR",
-            "errors": exc.errors(),
+            "errors": json_safe(exc.errors()),
         },
     )
 
@@ -293,6 +370,7 @@ async def validation_exception_handler(_request: Request, exc: RequestValidation
 def on_startup() -> None:
     """Initialize SQLite tables when the app starts."""
 
+    EmailService().require_production_config()
     init_db()
 # ==================== END AUTH ADDITION ====================
 
@@ -354,7 +432,16 @@ def register_user(payload: UserRegister, db: Session = Depends(get_db)) -> Token
     db.add(user)
     db.commit()
     db.refresh(user)
-    send_verification_for_user(user, db)
+    try:
+        send_verification_for_user(user, db)
+    except Exception as exc:  # noqa: BLE001 - return a structured account-delivery error.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "detail": "Account was created, but the verification email could not be sent. Please contact support or try resending verification later.",
+                "error_code": "EMAIL_DELIVERY_FAILED",
+            },
+        ) from exc
     user.last_login_at = datetime.now(UTC)
     db.commit()
     db.refresh(user)
@@ -638,12 +725,13 @@ def generate_outline(
     db: Session = Depends(get_db),
 ) -> GenerateOutlineResponse:
     """Step 1: Generate a video outline from questionnaire input."""
+    questionnaire_id = resolve_questionnaire_id(db, current_user.id, payload.questionnaire_id)
     job = GenerationJob(
         user_id=current_user.id,
         job_type="outline",
         status="running",
         provider="mock",
-        input_json=model_to_json(payload),
+        input_json=model_to_json({**payload.model_dump(), "questionnaire_id": questionnaire_id}),
         started_at=utc_now(),
     )
     db.add(job)
@@ -656,16 +744,32 @@ def generate_outline(
         outline, source = service.generate_outline(payload.questionnaire)
         outline_record = GeneratedOutline(
             user_id=current_user.id,
+            questionnaire_id=questionnaire_id,
             source=source_provider(source),
             outline_json=model_to_json(outline),
         )
         db.add(outline_record)
+        db.flush()
         job.status = "success"
         job.provider = source_provider(source)
         job.model = service.model
-        job.output_json = model_to_json({"outline": outline.model_dump(), "source": source})
         job.latency_ms = int((time.monotonic() - started) * 1000)
+        job.output_json = model_to_json({
+            "outline": outline.model_dump(),
+            "source": source,
+            "generated_outline_id": outline_record.id,
+            "questionnaire_id": questionnaire_id,
+        })
         job.completed_at = utc_now()
+        create_api_usage_log(
+            db,
+            operation="generate_outline",
+            provider=job.provider,
+            model=job.model,
+            generation_job_id=job.id,
+            user_id=current_user.id,
+            latency_ms=job.latency_ms,
+        )
         db.commit()
         db.refresh(outline_record)
         db.refresh(job)
@@ -680,6 +784,15 @@ def generate_outline(
         job.error_message = str(exc)
         job.latency_ms = int((time.monotonic() - started) * 1000)
         job.completed_at = utc_now()
+        create_api_usage_log(
+            db,
+            operation="generate_outline",
+            provider=job.provider,
+            model=job.model,
+            generation_job_id=job.id,
+            user_id=current_user.id,
+            latency_ms=job.latency_ms,
+        )
         db.commit()
         raise HTTPException(
             status_code=502,
@@ -694,12 +807,21 @@ def generate_prompts(
     db: Session = Depends(get_db),
 ) -> GeneratePromptsResponse:
     """Step 3: Convert reviewed outline into English video-generation prompts."""
+    questionnaire_id = resolve_questionnaire_id(db, current_user.id, payload.questionnaire_id)
+    outline_id = payload.generated_outline_id or payload.outline_id
+    if outline_id:
+        outline_record = db.get(GeneratedOutline, outline_id)
+        if outline_record is None or outline_record.user_id != current_user.id:
+            outline_id = None
+        elif questionnaire_id is None:
+            questionnaire_id = outline_record.questionnaire_id
+
     job = GenerationJob(
         user_id=current_user.id,
         job_type="prompt",
         status="running",
         provider="mock",
-        input_json=model_to_json(payload),
+        input_json=model_to_json({**payload.model_dump(), "questionnaire_id": questionnaire_id, "outline_id": outline_id}),
         started_at=utc_now(),
     )
     db.add(job)
@@ -716,16 +838,34 @@ def generate_prompts(
         )
         package_record = GeneratedPromptPackage(
             user_id=current_user.id,
+            questionnaire_id=questionnaire_id,
+            outline_id=outline_id,
             source=source_provider(source),
             prompt_package_json=model_to_json(prompt_package),
         )
         db.add(package_record)
+        db.flush()
         job.status = "success"
         job.provider = source_provider(source)
         job.model = service.model
-        job.output_json = model_to_json({"prompt_package": prompt_package.model_dump(), "source": source})
         job.latency_ms = int((time.monotonic() - started) * 1000)
+        job.output_json = model_to_json({
+            "prompt_package": prompt_package.model_dump(),
+            "source": source,
+            "generated_prompt_package_id": package_record.id,
+            "generated_outline_id": outline_id,
+            "questionnaire_id": questionnaire_id,
+        })
         job.completed_at = utc_now()
+        create_api_usage_log(
+            db,
+            operation="generate_prompts",
+            provider=job.provider,
+            model=job.model,
+            generation_job_id=job.id,
+            user_id=current_user.id,
+            latency_ms=job.latency_ms,
+        )
         db.commit()
         db.refresh(package_record)
         db.refresh(job)
@@ -740,6 +880,15 @@ def generate_prompts(
         job.error_message = str(exc)
         job.latency_ms = int((time.monotonic() - started) * 1000)
         job.completed_at = utc_now()
+        create_api_usage_log(
+            db,
+            operation="generate_prompts",
+            provider=job.provider,
+            model=job.model,
+            generation_job_id=job.id,
+            user_id=current_user.id,
+            latency_ms=job.latency_ms,
+        )
         db.commit()
         raise HTTPException(
             status_code=502,
@@ -762,6 +911,8 @@ def run_video_generation_job(job_id: int) -> None:
         job = db.get(GenerationJob, job_id)
         if job is None:
             return
+        if job.status == "success":
+            return
         job.status = "running"
         job.started_at = utc_now()
         db.commit()
@@ -771,16 +922,20 @@ def run_video_generation_job(job_id: int) -> None:
         openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
         is_placeholder_key = not openai_api_key or openai_api_key.startswith("sk-your")
         if allow_mock and is_placeholder_key:
+            storage = VideoStorageService(base_dir=get_local_video_storage_dir())
             result = {
                 "video_id": f"mock-video-{job.id}",
                 "status": "completed",
                 "video_url": "",
+                "file_path": "",
+                "storage_backend": storage.get_storage_backend(),
+                "file_size": None,
                 "model": "mock-sora-2",
                 "size": os.getenv("OPENAI_VIDEO_SIZE", "720x1280"),
                 "seconds": str(input_payload.get("duration_seconds", 4)),
             }
         else:
-            service = OpenAIVideoService(output_dir=STATIC_DIR / "generated_videos")
+            service = OpenAIVideoService(output_dir=get_local_video_storage_dir())
             result = service.generate_scene_video(
                 prompt=input_payload["prompt_en"],
                 duration_seconds=float(input_payload.get("duration_seconds", 4)),
@@ -789,21 +944,35 @@ def run_video_generation_job(job_id: int) -> None:
         asset = VideoAsset(
             user_id=job.user_id,
             generation_job_id=job.id,
+            prompt_package_id=input_payload.get("prompt_package_id"),
             scene_number=input_payload.get("scene_number"),
             provider_video_id=result.get("video_id"),
+            storage_backend=result.get("storage_backend"),
             video_url=result.get("video_url"),
+            file_path=result.get("file_path"),
+            file_size=int(result["file_size"]) if result.get("file_size") else None,
             model=result.get("model"),
             size=result.get("size"),
             seconds=float(result.get("seconds") or input_payload.get("duration_seconds", 4)),
             status=result.get("status", "completed"),
         )
         db.add(asset)
+        db.flush()
         job.status = "success"
         job.provider = "mock" if result.get("model") == "mock-sora-2" else "openai"
         job.model = result.get("model")
-        job.output_json = model_to_json(result)
         job.latency_ms = int((time.monotonic() - started) * 1000)
+        job.output_json = model_to_json({**result, "video_asset_id": asset.id})
         job.completed_at = utc_now()
+        create_api_usage_log(
+            db,
+            operation="generate_video",
+            provider=job.provider,
+            model=job.model,
+            generation_job_id=job.id,
+            user_id=job.user_id,
+            latency_ms=job.latency_ms,
+        )
         db.commit()
     except Exception as exc:  # noqa: BLE001 - background errors must be captured in the job row.
         job = db.get(GenerationJob, job_id)
@@ -812,6 +981,15 @@ def run_video_generation_job(job_id: int) -> None:
             job.error_message = str(exc)
             job.latency_ms = int((time.monotonic() - started) * 1000)
             job.completed_at = utc_now()
+            create_api_usage_log(
+                db,
+                operation="generate_video",
+                provider=job.provider,
+                model=job.model,
+                generation_job_id=job.id,
+                user_id=job.user_id,
+                latency_ms=job.latency_ms,
+            )
             db.commit()
     finally:
         db.close()
@@ -826,12 +1004,18 @@ def create_video_job(
 ) -> VideoJobCreateResponse:
     """Create an asynchronous scene video generation job."""
 
+    payload_data = payload.model_dump()
+    if payload.prompt_package_id:
+        package = db.get(GeneratedPromptPackage, payload.prompt_package_id)
+        if package is None or package.user_id != current_user.id:
+            payload_data["prompt_package_id"] = None
+
     job = GenerationJob(
         user_id=current_user.id,
         job_type="video",
         status="pending",
         provider="mock",
-        input_json=model_to_json(payload),
+        input_json=model_to_json(payload_data),
     )
     db.add(job)
     db.commit()
@@ -984,6 +1168,7 @@ def get_admin_metrics(
         "total_video_jobs": row_count(db, GenerationJob, GenerationJob.job_type == "video"),
         "successful_jobs": row_count(db, GenerationJob, GenerationJob.status == "success"),
         "failed_jobs": row_count(db, GenerationJob, GenerationJob.status == "failed"),
+        "total_api_usage_rows": row_count(db, ApiUsageLog),
         "estimated_total_cost": float(estimated_total_cost or 0),
         "recent_errors": [
             {

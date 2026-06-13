@@ -37,31 +37,41 @@ class Base(DeclarativeBase):
     """Base class for SQLAlchemy ORM models."""
 
 
-def _add_missing_sqlite_user_columns() -> None:
-    """Add Phase 2 user columns for existing local SQLite databases."""
+def _add_missing_sqlite_columns() -> None:
+    """Add simple compatibility columns for existing local SQLite databases."""
 
     if not is_sqlite:
         return
 
-    sqlite_columns = {
-        "full_name": "VARCHAR(255)",
-        "company_name": "VARCHAR(255)",
-        "avatar_url": "VARCHAR(500)",
-        "phone": "VARCHAR(50)",
-        "email_verified": "BOOLEAN NOT NULL DEFAULT 0",
-        "email_verified_at": "DATETIME",
-        "role": "VARCHAR(20) NOT NULL DEFAULT 'user'",
-        "is_active": "BOOLEAN NOT NULL DEFAULT 1",
-        "last_login_at": "DATETIME",
+    sqlite_columns_by_table = {
+        "users": {
+            "full_name": "VARCHAR(255)",
+            "company_name": "VARCHAR(255)",
+            "avatar_url": "VARCHAR(500)",
+            "phone": "VARCHAR(50)",
+            "email_verified": "BOOLEAN NOT NULL DEFAULT 0",
+            "email_verified_at": "DATETIME",
+            "role": "VARCHAR(20) NOT NULL DEFAULT 'user'",
+            "is_active": "BOOLEAN NOT NULL DEFAULT 1",
+            "last_login_at": "DATETIME",
+        },
+        "video_assets": {
+            "prompt_package_id": "INTEGER",
+            "storage_backend": "VARCHAR(50)",
+            "file_size": "INTEGER",
+        },
     }
 
     with engine.begin() as connection:
-        existing_columns = {
-            row[1] for row in connection.execute(text("PRAGMA table_info(users)")).all()
-        }
-        for column_name, column_type in sqlite_columns.items():
-            if column_name not in existing_columns:
-                connection.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}"))
+        for table_name, sqlite_columns in sqlite_columns_by_table.items():
+            existing_columns = {
+                row[1] for row in connection.execute(text(f"PRAGMA table_info({table_name})")).all()
+            }
+            if not existing_columns:
+                continue
+            for column_name, column_type in sqlite_columns.items():
+                if column_name not in existing_columns:
+                    connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"))
 
 
 def init_db() -> None:
@@ -74,7 +84,7 @@ def init_db() -> None:
     from app import models  # noqa: F401  # pylint: disable=unused-import,import-outside-toplevel
 
     Base.metadata.create_all(bind=engine)
-    _add_missing_sqlite_user_columns()
+    _add_missing_sqlite_columns()
 
 
 def get_db() -> Generator[Session, None, None]:

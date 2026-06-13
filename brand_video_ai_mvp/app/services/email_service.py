@@ -25,6 +25,12 @@ class EmailService:
 
         return bool(self.smtp_host and self.smtp_from_email)
 
+    def require_production_config(self) -> None:
+        """Raise a clear startup error when production email cannot be delivered."""
+
+        if self.app_env == "production" and not self.is_configured:
+            raise RuntimeError("SMTP is required in production for email verification.")
+
     def send_verification_email(self, to_email: str, verification_url: str) -> None:
         """Send or log an email verification link."""
 

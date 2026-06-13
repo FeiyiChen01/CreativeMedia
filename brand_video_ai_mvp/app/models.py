@@ -256,10 +256,13 @@ class VideoAsset(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     generation_job_id: Mapped[int] = mapped_column(ForeignKey("generation_jobs.id"), nullable=False, index=True)
+    prompt_package_id: Mapped[int | None] = mapped_column(ForeignKey("generated_prompt_packages.id"), nullable=True, index=True)
     scene_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     provider_video_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    storage_backend: Mapped[str | None] = mapped_column(String(50), nullable=True)
     video_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     file_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     size: Mapped[str | None] = mapped_column(String(50), nullable=True)
     seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -362,6 +365,7 @@ class VideoOutline(BaseModel):
 
 class GenerateOutlineRequest(BaseModel):
     questionnaire: BrandQuestionnaire
+    questionnaire_id: int | None = None
 
 
 class GenerateOutlineResponse(BaseModel):
@@ -377,6 +381,9 @@ class ReviewOutlineRequest(BaseModel):
     questionnaire: BrandQuestionnaire
     outline: VideoOutline
     target_tool: Literal["sora-2"] = "sora-2"
+    questionnaire_id: int | None = None
+    generated_outline_id: int | None = None
+    outline_id: int | None = None
 
 
 class ScenePrompt(BaseModel):

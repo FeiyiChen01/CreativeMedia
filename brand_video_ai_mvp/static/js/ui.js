@@ -2,7 +2,9 @@
   const studioState = {
     outline: null,
     outlineSource: null,
+    generatedOutlineId: null,
     promptPackage: null,
+    generatedPromptPackageId: null,
     generatedVideos: 0,
     socialAccounts: []
   };
@@ -556,7 +558,9 @@
       const response = await window.Api.generateOutline(aiPayload);
       studioState.outline = response.outline;
       studioState.outlineSource = response.source;
+      studioState.generatedOutlineId = response.generated_outline_id || null;
       studioState.promptPackage = null;
+      studioState.generatedPromptPackageId = null;
       setStudioProgress(100, 'Outline generated.');
       renderOutline(response.outline, response.source);
       const promptButton = $('btn-generate-prompts');
@@ -586,8 +590,12 @@
     setStudioProgress(35, 'Creating Sora scene prompts in the background...');
 
     try {
-      const response = await window.Api.generatePrompts(aiPayload, studioState.outline, 'sora-2');
+      const response = await window.Api.generatePrompts(aiPayload, studioState.outline, 'sora-2', {
+        questionnaire_id: window.authState.questionnaire?.id || null,
+        generated_outline_id: studioState.generatedOutlineId
+      });
       studioState.promptPackage = response.prompt_package;
+      studioState.generatedPromptPackageId = response.generated_prompt_package_id || null;
       setStudioProgress(100, 'Sora scene prompts are ready.');
       renderScenePromptActions(response.prompt_package);
       hideStudioProgressSoon();
@@ -614,7 +622,10 @@
     setStudioProgress(55, `Generating scene ${scenePrompt.scene_number} with Sora-2...`);
 
     try {
-      const created = await window.Api.generateSceneVideo(scenePrompt.prompt_en, scenePrompt.duration_seconds);
+      const created = await window.Api.generateSceneVideo(scenePrompt.prompt_en, scenePrompt.duration_seconds, {
+        scene_number: scenePrompt.scene_number,
+        prompt_package_id: studioState.generatedPromptPackageId
+      });
       if (resultContainer) {
         resultContainer.innerHTML = `
           <div class="mt-3 rounded-xl border border-brand-purple/30 bg-brand-purple/10 p-3 text-xs text-slate-300">
@@ -745,7 +756,9 @@
   function resetStudioState() {
     studioState.outline = null;
     studioState.outlineSource = null;
+    studioState.generatedOutlineId = null;
     studioState.promptPackage = null;
+    studioState.generatedPromptPackageId = null;
     hideElement($('outline-panel'));
     hideElement($('studio-progress'));
     clearError('studio-error');
@@ -944,6 +957,7 @@
       ['Verified', metrics.verified_users],
       ['Jobs', metrics.total_generation_jobs],
       ['Failed', metrics.failed_jobs],
+      ['API Rows', metrics.total_api_usage_rows],
       ['Outlines', metrics.total_generated_outlines],
       ['Prompts', metrics.total_prompt_packages],
       ['Videos', metrics.total_video_jobs],
@@ -952,6 +966,75 @@
     setHtml('admin-metrics', items.map(([label, value]) => `
       <div class="metric-card"><span class="metric-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>Live backend data</small></div>
     `).join(''));
+  }
+
+  function renderAdminUserRow(userRow) {
+    const isCurrentUser = Number(userRow.id) === Number(window.authState.user?.id);
+    const activeLabel = userRow.is_active ? 'Disable' : 'Enable';
+    const roleLabel = userRow.role === 'admin' ? 'Make User' : 'Make Admin';
+    const verifiedButton = userRow.email_verified
+      ? ''
+      : `<button type="button" class="secondary-btn text-[10px] py-1 px-2" onclick="handleAdminUserAction(${Number(userRow.id)}, 'verify')">
+          <i class="fa-solid fa-envelope-circle-check"></i><span>Verify</span>
+        </button>`;
+
+    return `
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <strong>${escapeHtml(userRow.email)}</strong>${isCurrentUser ? ' <span class="text-[10px] text-brand-purple">(you)</span>' : ''}<br>
+          ${escapeHtml(userRow.username)} · ${escapeHtml(userRow.role)} · ${userRow.email_verified ? 'verified' : 'unverified'} · ${userRow.is_active ? 'active' : 'inactive'}
+        </div>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" class="secondary-btn text-[10px] py-1 px-2" onclick="handleAdminUserAction(${Number(userRow.id)}, 'toggle_active')">
+            <i class="fa-solid ${userRow.is_active ? 'fa-user-slash' : 'fa-user-check'}"></i><span>${activeLabel}</span>
+          </button>
+          <button type="button" class="secondary-btn text-[10px] py-1 px-2" onclick="handleAdminUserAction(${Number(userRow.id)}, 'toggle_role')">
+            <i class="fa-solid fa-user-shield"></i><span>${roleLabel}</span>
+          </button>
+          ${verifiedButton}
+        </div>
+      </div>
+    `;
+  }
+
+  async function handleAdminUserAction(userId, action) {
+    clearError('admin-error');
+    clearSuccess('admin-success');
+
+    const users = await window.Api.listAdminUsers();
+    const target = users.find((userRow) => Number(userRow.id) === Number(userId));
+    if (!target) {
+      showError('admin-error', 'User was not found.');
+      return;
+    }
+
+    const payload = {};
+    if (action === 'toggle_active') {
+      if (Number(target.id) === Number(window.authState.user?.id) && target.is_active) {
+        const confirmed = window.confirm('You are about to disable your own account. Continue?');
+        if (!confirmed) return;
+      }
+      payload.is_active = !target.is_active;
+    } else if (action === 'toggle_role') {
+      payload.role = target.role === 'admin' ? 'user' : 'admin';
+    } else if (action === 'verify') {
+      payload.email_verified = true;
+    } else {
+      showError('admin-error', 'Unknown admin action.');
+      return;
+    }
+
+    try {
+      const updated = await window.Api.updateAdminUser(userId, payload);
+      if (Number(updated.id) === Number(window.authState.user?.id)) {
+        window.authState.user = updated;
+        localStorage.setItem('current_user', JSON.stringify(updated));
+      }
+      showSuccess('admin-success', 'User updated.');
+      await loadAdminDashboard();
+    } catch (error) {
+      showError('admin-error', error.message || 'Failed to update user.');
+    }
   }
 
   async function loadAdminDashboard() {
@@ -975,7 +1058,7 @@
       ]);
 
       renderAdminMetrics(metrics);
-      renderAdminRows('admin-users', users, (userRow) => `<strong>${escapeHtml(userRow.email)}</strong><br>${escapeHtml(userRow.username)} · ${escapeHtml(userRow.role)} · ${userRow.email_verified ? 'verified' : 'unverified'} · ${userRow.is_active ? 'active' : 'inactive'}`);
+      renderAdminRows('admin-users', users, renderAdminUserRow);
       renderAdminRows('admin-questionnaires', questionnaires, (item) => `<strong>${escapeHtml(item.brand_name || '-')}</strong><br>User ${escapeHtml(item.user_id)} · ${escapeHtml(item.video_style || '-')}`);
       renderAdminRows('admin-generation-jobs', jobs, (job) => `<strong>#${escapeHtml(job.id)} ${escapeHtml(job.job_type)}</strong><br>${escapeHtml(job.status)} · user ${escapeHtml(job.user_id)} · ${escapeHtml(job.provider)}`);
       renderAdminRows('admin-video-assets', assets, (asset) => `<strong>#${escapeHtml(asset.id)} ${escapeHtml(asset.status)}</strong><br>Job ${escapeHtml(asset.generation_job_id)} · ${escapeHtml(asset.model || '-')}`);
@@ -1051,6 +1134,7 @@
   window.handleGeneratePrompts = handleGeneratePrompts;
   window.handleGenerateSceneVideo = handleGenerateSceneVideo;
   window.handleResendVerification = handleResendVerification;
+  window.handleAdminUserAction = handleAdminUserAction;
   window.loadAdminDashboard = loadAdminDashboard;
   window.resetStudioState = resetStudioState;
 })();

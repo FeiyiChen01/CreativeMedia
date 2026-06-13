@@ -195,23 +195,28 @@
     }, true);
   }
 
-  async function generatePrompts(questionnairePayload, outline, targetTool = 'sora-2') {
+  async function generatePrompts(questionnairePayload, outline, targetTool = 'sora-2', options = {}) {
     return apiFetch('/api/generate-prompts', {
       method: 'POST',
       body: JSON.stringify({
         questionnaire: questionnairePayload,
         outline,
-        target_tool: targetTool
+        target_tool: targetTool,
+        questionnaire_id: options.questionnaire_id || null,
+        generated_outline_id: options.generated_outline_id || null,
+        outline_id: options.outline_id || null
       })
     }, true);
   }
 
-  async function generateSceneVideo(promptEn, durationSeconds = 4) {
+  async function generateSceneVideo(promptEn, durationSeconds = 4, options = {}) {
     return apiFetch('/api/video-jobs', {
       method: 'POST',
       body: JSON.stringify({
         prompt_en: promptEn,
-        duration_seconds: durationSeconds
+        duration_seconds: durationSeconds,
+        scene_number: options.scene_number || null,
+        prompt_package_id: options.prompt_package_id || null
       })
     }, true);
   }
@@ -226,6 +231,13 @@
 
   async function listAdminUsers() {
     return apiFetch('/api/admin/users', { method: 'GET' }, true);
+  }
+
+  async function updateAdminUser(userId, payload) {
+    return apiFetch(`/api/admin/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }, true);
   }
 
   async function listAdminQuestionnaires() {
@@ -274,6 +286,7 @@
     getVideoJob,
     getAdminMetrics,
     listAdminUsers,
+    updateAdminUser,
     listAdminQuestionnaires,
     listAdminGenerationJobs,
     listAdminVideoAssets,

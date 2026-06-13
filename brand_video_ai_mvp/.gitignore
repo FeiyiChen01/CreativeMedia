@@ -6,7 +6,7 @@ __pycache__/
 .idea/
 .vscode/
 static/generated_videos
-.zip/
+*.zip
 test.db
 web.html
 *.json

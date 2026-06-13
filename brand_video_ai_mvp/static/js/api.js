@@ -112,6 +112,53 @@
     return apiFetch('/api/auth/me', { method: 'GET' }, true);
   }
 
+  async function resendVerification() {
+    return apiFetch('/api/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({})
+    }, true);
+  }
+
+  async function forgotPassword(email) {
+    return apiFetch('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    }, false);
+  }
+
+  async function resetPassword(token, newPassword, newPasswordConfirm) {
+    return apiFetch('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        token,
+        new_password: newPassword,
+        new_password_confirm: newPasswordConfirm
+      })
+    }, false);
+  }
+
+  async function getProfile() {
+    return apiFetch('/api/profile', { method: 'GET' }, true);
+  }
+
+  async function updateProfile(profileData) {
+    return apiFetch('/api/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(profileData)
+    }, true);
+  }
+
+  async function changePassword(currentPassword, newPassword, newPasswordConfirm) {
+    return apiFetch('/api/profile/change-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+        new_password_confirm: newPasswordConfirm
+      })
+    }, true);
+  }
+
   async function saveQuestionnaire(questionnaireData) {
     return tryEndpoints([
       '/api/questionnaire',
@@ -160,7 +207,7 @@
   }
 
   async function generateSceneVideo(promptEn, durationSeconds = 4) {
-    return apiFetch('/api/generate-scene-video', {
+    return apiFetch('/api/video-jobs', {
       method: 'POST',
       body: JSON.stringify({
         prompt_en: promptEn,
@@ -169,18 +216,69 @@
     }, true);
   }
 
+  async function getVideoJob(jobId) {
+    return apiFetch(`/api/video-jobs/${jobId}`, { method: 'GET' }, true);
+  }
+
+  async function getAdminMetrics() {
+    return apiFetch('/api/admin/metrics', { method: 'GET' }, true);
+  }
+
+  async function listAdminUsers() {
+    return apiFetch('/api/admin/users', { method: 'GET' }, true);
+  }
+
+  async function listAdminQuestionnaires() {
+    return apiFetch('/api/admin/questionnaires', { method: 'GET' }, true);
+  }
+
+  async function listAdminGenerationJobs() {
+    return apiFetch('/api/admin/generation-jobs', { method: 'GET' }, true);
+  }
+
+  async function listAdminVideoAssets() {
+    return apiFetch('/api/admin/video-assets', { method: 'GET' }, true);
+  }
+
+  async function listAdminApiUsage() {
+    return apiFetch('/api/admin/api-usage', { method: 'GET' }, true);
+  }
+
+  async function listAdminActionLogs() {
+    return apiFetch('/api/admin/action-logs', { method: 'GET' }, true);
+  }
+
+  async function getSystemPrompts() {
+    return apiFetch('/api/system-prompts', { method: 'GET' }, true);
+  }
+
   window.Api = {
     apiFetch,
     register,
     login,
     logout,
     getCurrentUser,
+    resendVerification,
+    forgotPassword,
+    resetPassword,
+    getProfile,
+    updateProfile,
+    changePassword,
     saveQuestionnaire,
     getQuestionnaire,
     listSocialAccounts,
     addSocialAccount,
     generateOutline,
     generatePrompts,
-    generateSceneVideo
+    generateSceneVideo,
+    getVideoJob,
+    getAdminMetrics,
+    listAdminUsers,
+    listAdminQuestionnaires,
+    listAdminGenerationJobs,
+    listAdminVideoAssets,
+    listAdminApiUsage,
+    listAdminActionLogs,
+    getSystemPrompts
   };
 })();

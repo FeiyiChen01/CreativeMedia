@@ -87,7 +87,7 @@
                 <input type="checkbox" class="rounded border-brand-border bg-brand-dark text-brand-purple focus:ring-brand-purple">
                 Remember me
               </label>
-              <a href="#" class="text-brand-purple hover:underline">Forgot password?</a>
+              <button type="button" onclick="showForgotPasswordForm()" class="text-brand-purple hover:underline">Forgot password?</button>
             </div>
             <button id="login-submit-btn" type="submit" class="primary-btn w-full">
               <i class="fa-solid fa-lock-open"></i>
@@ -129,6 +129,44 @@
               已有账户？
               <button type="button" class="text-brand-purple hover:underline font-semibold" onclick="switchAuthTab('login')">返回登录</button>
             </p>
+          </form>
+
+          <form id="forgot-password-form" class="hidden space-y-4" novalidate>
+            <div>
+              <label for="forgot-email" class="form-label">Email</label>
+              <input id="forgot-email" name="email" type="email" autocomplete="email" class="form-input" placeholder="user@example.com" required>
+            </div>
+            <button id="forgot-password-submit-btn" type="submit" class="primary-btn w-full">
+              <i class="fa-solid fa-paper-plane"></i>
+              <span>Send reset link</span>
+            </button>
+            <button type="button" class="secondary-btn w-full" onclick="switchAuthTab('login')">
+              <i class="fa-solid fa-arrow-left"></i>
+              Back to login
+            </button>
+          </form>
+
+          <form id="reset-password-form" class="hidden space-y-4" novalidate>
+            <div>
+              <label for="reset-token" class="form-label">Reset Token</label>
+              <input id="reset-token" name="token" type="text" class="form-input" placeholder="Paste token from reset link" required>
+            </div>
+            <div>
+              <label for="reset-new-password" class="form-label">New Password</label>
+              <input id="reset-new-password" name="new_password" type="password" autocomplete="new-password" class="form-input" required>
+            </div>
+            <div>
+              <label for="reset-new-password-confirm" class="form-label">Confirm New Password</label>
+              <input id="reset-new-password-confirm" name="new_password_confirm" type="password" autocomplete="new-password" class="form-input" required>
+            </div>
+            <button id="reset-password-submit-btn" type="submit" class="primary-btn w-full">
+              <i class="fa-solid fa-key"></i>
+              <span>Reset password</span>
+            </button>
+            <button type="button" class="secondary-btn w-full" onclick="switchAuthTab('login')">
+              <i class="fa-solid fa-arrow-left"></i>
+              Back to login
+            </button>
           </form>
         </div>
 
@@ -287,6 +325,14 @@
           <button onclick="switchTab('calendar')" id="nav-calendar" class="nav-btn">
             <i class="fa-solid fa-calendar-days text-lg w-5"></i>
             <span>多端统一排期</span>
+          </button>
+          <button onclick="switchTab('profile')" id="nav-profile" class="nav-btn">
+            <i class="fa-solid fa-user-gear text-lg w-5"></i>
+            <span>Profile / Account</span>
+          </button>
+          <button onclick="switchTab('admin')" id="nav-admin" class="nav-btn hidden">
+            <i class="fa-solid fa-shield-halved text-lg w-5"></i>
+            <span>Admin</span>
           </button>
         </nav>
       </div>
@@ -466,6 +512,72 @@
           <div class="bg-brand-card border border-brand-border rounded-2xl p-6">
             <h3 class="font-display font-bold text-lg text-white">Unified Calendar</h3>
             <p class="text-sm text-slate-500 mt-2">Scheduling UI placeholder. You can connect generated scene assets here later.</p>
+          </div>
+        </section>
+
+        <section id="tab-profile" class="space-y-6 hidden">
+          <div class="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+            <form id="profile-form" class="xl:col-span-7 bg-brand-card border border-brand-border rounded-2xl p-6 space-y-4" novalidate>
+              <div>
+                <h3 class="font-display font-bold text-lg text-white">Profile / Account Settings</h3>
+                <p class="text-xs text-slate-500 mt-1">Manage basic profile fields and account security.</p>
+              </div>
+              <div id="profile-error" class="hidden rounded-xl border border-brand-pink/40 bg-brand-pink/10 px-4 py-3 text-xs text-rose-200"></div>
+              <div id="profile-success" class="hidden rounded-xl border border-brand-teal/40 bg-brand-teal/10 px-4 py-3 text-xs text-emerald-200"></div>
+              <div class="grid md:grid-cols-2 gap-4">
+                <div><label class="form-label">Username</label><input id="profile-username" name="username" class="form-input"></div>
+                <div><label class="form-label">Email</label><input id="profile-email" class="form-input" disabled></div>
+                <div><label class="form-label">Full Name</label><input id="profile-full-name" name="full_name" class="form-input"></div>
+                <div><label class="form-label">Company Name</label><input id="profile-company-name" name="company_name" class="form-input"></div>
+                <div class="md:col-span-2"><label class="form-label">Avatar URL</label><input id="profile-avatar-url" name="avatar_url" class="form-input" placeholder="https://..."></div>
+              </div>
+              <button id="profile-submit-btn" type="submit" class="primary-btn"><i class="fa-solid fa-floppy-disk"></i><span>Save Profile</span></button>
+            </form>
+
+            <div class="xl:col-span-5 space-y-6">
+              <div class="bg-brand-card border border-brand-border rounded-2xl p-6 space-y-4">
+                <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">Email Verification</h3>
+                <div id="profile-verification-status" class="text-sm text-slate-400">-</div>
+                <button id="profile-resend-verification-btn" onclick="handleResendVerification()" class="secondary-btn text-xs">
+                  <i class="fa-solid fa-envelope-circle-check"></i>
+                  Resend verification email
+                </button>
+              </div>
+              <form id="change-password-form" class="bg-brand-card border border-brand-border rounded-2xl p-6 space-y-4" novalidate>
+                <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">Security</h3>
+                <div id="password-error" class="hidden rounded-xl border border-brand-pink/40 bg-brand-pink/10 px-4 py-3 text-xs text-rose-200"></div>
+                <div id="password-success" class="hidden rounded-xl border border-brand-teal/40 bg-brand-teal/10 px-4 py-3 text-xs text-emerald-200"></div>
+                <div><label class="form-label">Current Password</label><input name="current_password" type="password" class="form-input" required></div>
+                <div><label class="form-label">New Password</label><input name="new_password" type="password" class="form-input" required></div>
+                <div><label class="form-label">Confirm New Password</label><input name="new_password_confirm" type="password" class="form-input" required></div>
+                <button id="change-password-submit-btn" type="submit" class="primary-btn w-full"><i class="fa-solid fa-key"></i><span>Change Password</span></button>
+              </form>
+              <div class="bg-brand-card border border-brand-border rounded-2xl p-6">
+                <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3">Account Info</h3>
+                <div id="profile-account-info" class="space-y-2 text-xs text-slate-400"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-admin" class="space-y-6 hidden">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h3 class="font-display font-bold text-lg text-white">Admin Management</h3>
+              <p class="text-xs text-slate-500 mt-1">Operational data from users, jobs, assets, usage, logs, and system prompts.</p>
+            </div>
+            <button onclick="loadAdminDashboard()" class="secondary-btn text-xs"><i class="fa-solid fa-rotate"></i>Refresh</button>
+          </div>
+          <div id="admin-error" class="hidden rounded-xl border border-brand-pink/40 bg-brand-pink/10 px-4 py-3 text-xs text-rose-200"></div>
+          <div id="admin-metrics" class="grid grid-cols-1 md:grid-cols-4 gap-4"></div>
+          <div class="admin-grid">
+            <div class="admin-panel"><h4>Users</h4><div id="admin-users" class="admin-list"></div></div>
+            <div class="admin-panel"><h4>Questionnaires</h4><div id="admin-questionnaires" class="admin-list"></div></div>
+            <div class="admin-panel"><h4>Generation Jobs</h4><div id="admin-generation-jobs" class="admin-list"></div></div>
+            <div class="admin-panel"><h4>Video Assets</h4><div id="admin-video-assets" class="admin-list"></div></div>
+            <div class="admin-panel"><h4>API Usage / Cost</h4><div id="admin-api-usage" class="admin-list"></div></div>
+            <div class="admin-panel"><h4>Admin Action Logs</h4><div id="admin-action-logs" class="admin-list"></div></div>
+            <div class="admin-panel xl:col-span-2"><h4>System Prompts</h4><div id="admin-system-prompts" class="admin-list"></div></div>
           </div>
         </section>
       </div>

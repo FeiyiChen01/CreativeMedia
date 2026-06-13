@@ -2,7 +2,7 @@
 
 一个 AI 驱动的品牌 TikTok 短视频内容生成工具。商家填写品牌问卷后，系统自动生成短视频大纲；用户可以人工审查和修改大纲；通过后系统再生成适配 Runway Gen-3 / Kling / Pika 的英文视频生成 Prompt。
 
-> MVP 当前重点跑通 Step 1-3：问卷输入 → AI 视频大纲 → 人工审查 → 英文视频 Prompt。Step 4 自动生成视频片段暂未接入，后续可扩展 Kling / Runway API。
+> MVP 当前跑通：注册/登录 → 邮箱验证 → 问卷 → AI 大纲 → Prompt → 异步视频 job → 轮询结果，并提供 Profile 与 Admin 管理区。
 
 ---
 
@@ -30,12 +30,20 @@
   - 默认竖屏 `vertical 9:16`
 - 本地 Mock 模式
   - 没有 API Key 时，也能测试完整流程
+- Email verification and password reset
+  - SMTP 未配置且 `APP_ENV=development` 时，验证/重置链接会打印到终端日志
+- Profile / Account Settings
+  - 基础资料、邮箱验证状态、重发验证邮件、修改密码
+- Generated history persistence
+  - Outline、prompt package、video job、video asset 都会按当前用户保存
+- Async video job flow
+  - 前端创建 `/api/video-jobs` 后轮询 job 状态；本地 mock 模式不需要真实 OpenAI 视频调用
+- Admin dashboard
+  - 仅 admin 可见，展示用户、问卷、生成任务、视频资产、API usage、action logs、system prompts
 
 ### 暂未完成 / 后续扩展
 
-- 自动调用 Kling API / Runway API 生成视频
 - 视频片段自动拼接
-- 用户登录与项目保存
 - 品牌素材上传，如 Logo、产品图、品牌色
 - Prompt 版本管理
 
@@ -48,7 +56,8 @@
 - Backend: Python + FastAPI
 - AI Provider: OpenAI API
 - Frontend: 原生 HTML / CSS / JavaScript
-- Data Model: Pydantic
+- Data Model: SQLAlchemy ORM + Pydantic
+- Database: SQLite for local development, Neon PostgreSQL for Render deployment
 - Local Server: Uvicorn
 
 为什么这样选：
@@ -65,10 +74,15 @@
 brand_video_ai_mvp/
 ├── app/
 │   ├── main.py                    # FastAPI 路由入口
-│   ├── models.py                  # 请求/响应数据模型
+│   ├── models.py                  # SQLAlchemy ORM + AI 请求/响应数据模型
+│   ├── schemas.py                 # Auth / questionnaire / persistence schemas
+│   ├── database.py                # SQLite/PostgreSQL engine and sessions
+│   ├── auth.py                    # Password hashing, JWT auth, admin dependency
 │   ├── prompts.py                 # 核心 System Prompt
 │   └── services/
-│       └── openai_service.py      # OpenAI 调用逻辑 + Mock fallback
+│       ├── email_service.py       # SMTP delivery + development log fallback
+│       ├── openai_service.py      # OpenAI 调用逻辑 + Mock fallback
+│       └── openai_video_service.py
 ├── static/
 │   ├── index.html                 # 前端页面
 │   ├── style.css                  # 页面样式
@@ -121,16 +135,36 @@ cp .env.example .env
 然后打开 `.env`，填入：
 
 ```env
+APP_ENV=development
+DATABASE_URL=sqlite:///./test.db
+JWT_SECRET_KEY=change-me
+CORS_ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+ADMIN_EMAILS=
+APP_BASE_URL=http://localhost:8000
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=no-reply@example.com
 OPENAI_API_KEY=sk-your-openai-api-key-here
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-5.4-mini
 ALLOW_MOCK_AI=true
 ```
 
 说明：
 
+- `APP_ENV=development`：本地开发模式。生产环境必须设置为 `production`。
+- `DATABASE_URL=sqlite:///./test.db`：本地默认 SQLite 数据库。如果不设置，应用也会默认使用这个地址。
+- `JWT_SECRET_KEY`：本地可以使用示例值，生产环境必须换成强随机字符串，建议至少 32 个字符。
+- `CORS_ALLOWED_ORIGINS`：逗号分隔的允许来源。生产环境不要使用 `*`。
+- `ADMIN_EMAILS`：逗号分隔的管理员邮箱。用户用这些邮箱注册时会自动获得 `admin` 角色。
+- `APP_BASE_URL`：用于生成邮箱验证与密码重置链接。本地默认 `http://localhost:8000`。
+- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM_EMAIL`：SMTP 邮件配置。本地开发可以留空，系统会把链接打印到终端。
 - `OPENAI_API_KEY`：你的 OpenAI API Key。
-- `OPENAI_MODEL`：默认使用 `gpt-4o-mini`，你可以改成其他支持文本生成的模型。
+- `OPENAI_MODEL`：默认使用 `gpt-5.4-mini`，你可以改成其他支持文本生成的模型。
 - `ALLOW_MOCK_AI=true`：如果没有 API Key，系统会返回 Mock 数据，方便本地测试 UI 流程。
+
+本地 SQLite 会创建 `test.db`。如果你之前已经运行过旧版本，旧表结构不会被 `create_all` 自动修改；开发时可以停止服务后删除 `test.db`，让应用重新创建最新表结构。
 
 ### Step 5：启动项目
 
@@ -142,6 +176,104 @@ uvicorn app.main:app --reload --port 8000
 
 ```text
 http://localhost:8000
+```
+
+### Step 6：本地 SQLite 验证
+
+```bash
+python3 -c "from app.database import init_db; init_db(); print('database ok')"
+uvicorn app.main:app --reload --port 8000
+```
+
+打开 `http://localhost:8000`，注册、登录、填写 questionnaire，然后进入当前 dashboard/app 流程。
+
+### Step 7：运行测试
+
+```bash
+pytest
+```
+
+测试使用临时 SQLite 数据库，不会连接 Render/Neon，也不会发真实 SMTP 或真实 OpenAI 请求。
+
+---
+
+## 4.1 Render Web Service + Neon PostgreSQL
+
+### Render Web Service 设置
+
+1. 在 Render 创建新的 Web Service，连接你的 GitHub 仓库。
+2. Root Directory 设置为：
+
+```text
+brand_video_ai_mvp
+```
+
+3. Build Command：
+
+```bash
+pip install -r requirements.txt
+```
+
+4. Start Command：
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+5. 在 Render 的 Environment 里设置：
+
+```env
+APP_ENV=production
+DATABASE_URL=你的 Neon PostgreSQL 连接字符串
+JWT_SECRET_KEY=至少 32 个字符的强随机密钥
+CORS_ALLOWED_ORIGINS=https://你的-render-service.onrender.com
+ADMIN_EMAILS=founder@example.com
+OPENAI_API_KEY=sk-your-openai-api-key-here
+APP_BASE_URL=https://你的-render-service.onrender.com
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=smtp-user
+SMTP_PASSWORD=smtp-password
+SMTP_FROM_EMAIL=no-reply@example.com
+ALLOW_MOCK_AI=false
+```
+
+生产环境中，如果 `JWT_SECRET_KEY` 缺失、太短，或仍然是示例值，应用会拒绝启动。
+
+### Neon Free PostgreSQL 设置
+
+1. 在 Neon 创建免费项目。
+2. 创建或选择默认 database。
+3. 打开 Neon Dashboard 的 Connection Details。
+4. 复制 PostgreSQL connection string，通常形如：
+
+```text
+postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require
+```
+
+5. 粘贴到 Render Web Service 的 `DATABASE_URL` 环境变量。
+
+Render 部署启动后，应用会执行 `Base.metadata.create_all(bind=engine)` 创建当前表。这个 pass 暂时没有引入 Alembic；后续正式迁移再添加。
+
+### DBeaver 连接 Neon PostgreSQL
+
+1. 打开 DBeaver，选择 `New Database Connection`。
+2. 选择 PostgreSQL。
+3. 从 Neon connection string 中填写：
+   - Host：`@` 后、数据库名前的主机名
+   - Port：通常是 `5432`
+   - Database：连接字符串路径中的数据库名
+   - Username：连接字符串中的 USER
+   - Password：连接字符串中的 PASSWORD
+4. SSL 设置选择 `require`，或在 Driver properties 中设置 `sslmode=require`。
+5. 点击 `Test Connection`，成功后保存。
+
+### 不要提交的文件
+
+不要提交 `.env`、`test.db`、`.venv`、`youtubeAPI.json` 或任何 secrets/API keys。当前 `.gitignore` 已覆盖这些本地文件，但提交前仍建议检查：
+
+```bash
+git status --short
 ```
 
 ---

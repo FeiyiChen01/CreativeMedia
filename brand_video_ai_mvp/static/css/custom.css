@@ -228,6 +228,56 @@ html, body {
   overflow: hidden;
 }
 
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.admin-panel {
+  background: #111625;
+  border: 1px solid #1F2943;
+  border-radius: 1rem;
+  padding: 1.25rem;
+  min-width: 0;
+}
+
+.admin-panel h4 {
+  color: rgb(203 213 225);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.875rem;
+}
+
+.admin-list {
+  max-height: 360px;
+  overflow: auto;
+  display: grid;
+  gap: 0.625rem;
+}
+
+.admin-row {
+  background: rgba(6, 8, 15, 0.55);
+  border: 1px solid #1F2943;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  font-size: 0.75rem;
+  color: rgb(148 163 184);
+  min-width: 0;
+}
+
+.admin-row strong {
+  color: white;
+}
+
+@media (min-width: 1280px) {
+  .admin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 768px) {
   #page-main {
     flex-direction: column;

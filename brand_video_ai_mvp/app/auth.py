@@ -1,6 +1,7 @@
 """Authentication helpers for password hashing, JWTs, and current-user loading."""
 
 import os
+import warnings
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -17,9 +18,36 @@ from app.models import User
 
 load_dotenv()
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+DEFAULT_JWT_SECRET = "dev-secret-key-change-in-production"
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY") or DEFAULT_JWT_SECRET
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_DAYS = int(os.getenv("ACCESS_TOKEN_EXPIRE_DAYS", "7"))
+WEAK_JWT_SECRETS = {
+    "",
+    "change-me",
+    "your-secret-key-change-in-production",
+    DEFAULT_JWT_SECRET,
+}
+
+
+def _is_weak_jwt_secret(secret: str) -> bool:
+    """Return True when a JWT secret is unsuitable for production."""
+
+    return secret.strip() in WEAK_JWT_SECRETS or len(secret.strip()) < 32
+
+
+if APP_ENV == "production" and _is_weak_jwt_secret(JWT_SECRET_KEY):
+    raise RuntimeError(
+        "JWT_SECRET_KEY must be set to a strong unique value in production."
+    )
+
+if APP_ENV != "production" and _is_weak_jwt_secret(JWT_SECRET_KEY):
+    warnings.warn(
+        "Using a weak development JWT_SECRET_KEY. Set a strong JWT_SECRET_KEY before production.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -94,3 +122,17 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    """Require the authenticated user to be an active admin."""
+
+    if current_user.role != "admin" or not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "detail": "Admin access is required.",
+                "error_code": "ADMIN_REQUIRED",
+            },
+        )
+    return current_user

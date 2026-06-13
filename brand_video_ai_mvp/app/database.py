@@ -1,14 +1,10 @@
-"""Database configuration and session management for the MVP.
-
-This module keeps the SQLite/SQLAlchemy setup in one place so route handlers
-can request a database session through FastAPI dependencies.
-"""
+"""Database configuration and session management for the MVP."""
 
 import os
 from collections.abc import Generator
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 load_dotenv()
@@ -16,13 +12,17 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")
 
 # SQLite needs check_same_thread=False when FastAPI uses sessions across request handlers.
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+is_sqlite = DATABASE_URL.startswith("sqlite")
+connect_args = {"check_same_thread": False} if is_sqlite else {}
+engine_kwargs = {
+    "connect_args": connect_args,
+    "future": True,
+}
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args=connect_args,
-    future=True,
-)
+if not is_sqlite:
+    engine_kwargs["pool_pre_ping"] = True
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -37,6 +37,33 @@ class Base(DeclarativeBase):
     """Base class for SQLAlchemy ORM models."""
 
 
+def _add_missing_sqlite_user_columns() -> None:
+    """Add Phase 2 user columns for existing local SQLite databases."""
+
+    if not is_sqlite:
+        return
+
+    sqlite_columns = {
+        "full_name": "VARCHAR(255)",
+        "company_name": "VARCHAR(255)",
+        "avatar_url": "VARCHAR(500)",
+        "phone": "VARCHAR(50)",
+        "email_verified": "BOOLEAN NOT NULL DEFAULT 0",
+        "email_verified_at": "DATETIME",
+        "role": "VARCHAR(20) NOT NULL DEFAULT 'user'",
+        "is_active": "BOOLEAN NOT NULL DEFAULT 1",
+        "last_login_at": "DATETIME",
+    }
+
+    with engine.begin() as connection:
+        existing_columns = {
+            row[1] for row in connection.execute(text("PRAGMA table_info(users)")).all()
+        }
+        for column_name, column_type in sqlite_columns.items():
+            if column_name not in existing_columns:
+                connection.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}"))
+
+
 def init_db() -> None:
     """Create database tables on app startup.
 
@@ -47,6 +74,7 @@ def init_db() -> None:
     from app import models  # noqa: F401  # pylint: disable=unused-import,import-outside-toplevel
 
     Base.metadata.create_all(bind=engine)
+    _add_missing_sqlite_user_columns()
 
 
 def get_db() -> Generator[Session, None, None]:

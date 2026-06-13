@@ -29,6 +29,20 @@
     if (element) element.innerHTML = value;
   }
 
+  function showSuccess(containerId, message) {
+    const container = $(containerId);
+    if (!container) return;
+    container.textContent = message;
+    container.classList.remove('hidden');
+  }
+
+  function clearSuccess(containerId) {
+    const container = $(containerId);
+    if (!container) return;
+    container.textContent = '';
+    container.classList.add('hidden');
+  }
+
   function escapeHtml(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -118,9 +132,35 @@
     const isLogin = type === 'login';
     $('login-form')?.classList.toggle('hidden', !isLogin);
     $('register-form')?.classList.toggle('hidden', isLogin);
+    $('forgot-password-form')?.classList.add('hidden');
+    $('reset-password-form')?.classList.add('hidden');
     $('auth-tab-login')?.classList.toggle('auth-tab-active', isLogin);
     $('auth-tab-register')?.classList.toggle('auth-tab-active', !isLogin);
     clearError('auth-error');
+    clearSuccess('auth-success');
+  }
+
+  function showForgotPasswordForm() {
+    $('login-form')?.classList.add('hidden');
+    $('register-form')?.classList.add('hidden');
+    $('reset-password-form')?.classList.add('hidden');
+    $('forgot-password-form')?.classList.remove('hidden');
+    $('auth-tab-login')?.classList.remove('auth-tab-active');
+    $('auth-tab-register')?.classList.remove('auth-tab-active');
+    clearError('auth-error');
+    clearSuccess('auth-success');
+  }
+
+  function showResetPasswordForm(token = '') {
+    $('login-form')?.classList.add('hidden');
+    $('register-form')?.classList.add('hidden');
+    $('forgot-password-form')?.classList.add('hidden');
+    $('reset-password-form')?.classList.remove('hidden');
+    $('auth-tab-login')?.classList.remove('auth-tab-active');
+    $('auth-tab-register')?.classList.remove('auth-tab-active');
+    if ($('reset-token')) $('reset-token').value = token;
+    clearError('auth-error');
+    clearSuccess('auth-success');
   }
 
   async function routeAfterAuth(forceQuestionnaire = false) {
@@ -239,9 +279,70 @@
       const response = await window.Api.register(email, username, password, passwordConfirm);
       window.setToken(response.access_token, response.user);
       window.setQuestionnaire(null);
+      if (response.message) showSuccess('auth-success', response.message);
       showQuestionnairePage();
     } catch (error) {
       showError('auth-error', error.message || 'Registration failed.');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function handleForgotPassword(event) {
+    event.preventDefault();
+    clearError('auth-error');
+    clearSuccess('auth-success');
+
+    const data = getFormData(event.currentTarget);
+    const email = String(data.email || '').trim().toLowerCase();
+    if (!validateEmail(email)) {
+      showError('auth-error', 'Please enter a valid email address.');
+      return;
+    }
+
+    const button = $('forgot-password-submit-btn');
+    setButtonLoading(button, true, 'Sending reset link...');
+    try {
+      const response = await window.Api.forgotPassword(email);
+      showSuccess('auth-success', response.message || 'If the account exists, a reset link has been sent.');
+    } catch (error) {
+      showError('auth-error', error.message || 'Failed to request password reset.');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function handleResetPassword(event) {
+    event.preventDefault();
+    clearError('auth-error');
+    clearSuccess('auth-success');
+
+    const data = getFormData(event.currentTarget);
+    const token = String(data.token || '').trim();
+    const newPassword = String(data.new_password || '');
+    const confirm = String(data.new_password_confirm || '');
+
+    if (!token) {
+      showError('auth-error', 'Reset token is required.');
+      return;
+    }
+    if (!validatePassword(newPassword)) {
+      showError('auth-error', 'Password must be at least 8 characters and include uppercase, lowercase, and number.');
+      return;
+    }
+    if (newPassword !== confirm) {
+      showError('auth-error', 'Password confirmation does not match.');
+      return;
+    }
+
+    const button = $('reset-password-submit-btn');
+    setButtonLoading(button, true, 'Resetting password...');
+    try {
+      const response = await window.Api.resetPassword(token, newPassword, confirm);
+      switchAuthTab('login');
+      showSuccess('auth-success', response.message || 'Password reset. Please log in.');
+    } catch (error) {
+      showError('auth-error', error.message || 'Failed to reset password.');
     } finally {
       setButtonLoading(button, false);
     }
@@ -365,6 +466,7 @@
     setText('sidebar-username', user.username || 'User');
     setText('sidebar-email', user.email || '');
     setText('user-avatar-letter', (user.username || user.email || 'U').charAt(0).toUpperCase());
+    $('nav-admin')?.classList.toggle('hidden', user.role !== 'admin');
   }
 
   function renderQuestionnaireSummary() {
@@ -380,7 +482,7 @@
   }
 
   function switchTab(tabId) {
-    ['dashboard', 'studio', 'social', 'calendar'].forEach((tab) => {
+    ['dashboard', 'studio', 'social', 'calendar', 'profile', 'admin'].forEach((tab) => {
       const tabEl = $(`tab-${tab}`);
       const navEl = $(`nav-${tab}`);
       if (tabEl) tabEl.classList.toggle('hidden', tab !== tabId);
@@ -391,12 +493,20 @@
       dashboard: '品牌全渠道监控看板',
       studio: 'AI 创作实验室',
       social: '关联社交媒体',
-      calendar: '多端自动发布排期'
+      calendar: '多端自动发布排期',
+      profile: 'Profile / Account Settings',
+      admin: 'Admin Management'
     };
     setText('workspace-title', titles[tabId] || 'OmniSocial AI');
 
     if (tabId === 'social') {
       loadSocialAccounts();
+    }
+    if (tabId === 'profile') {
+      loadProfile();
+    }
+    if (tabId === 'admin') {
+      loadAdminDashboard();
     }
   }
 
@@ -504,31 +614,75 @@
     setStudioProgress(55, `Generating scene ${scenePrompt.scene_number} with Sora-2...`);
 
     try {
-      const result = await window.Api.generateSceneVideo(scenePrompt.prompt_en, scenePrompt.duration_seconds);
-      studioState.generatedVideos += 1;
-      setText('metric-generated', String(studioState.generatedVideos));
-      setText('preview-caption', `Scene ${scenePrompt.scene_number} generated successfully.`);
-
+      const created = await window.Api.generateSceneVideo(scenePrompt.prompt_en, scenePrompt.duration_seconds);
       if (resultContainer) {
         resultContainer.innerHTML = `
-          <div class="mt-3 space-y-3">
-            <video class="video-frame" src="${escapeHtml(result.video_url)}" controls playsinline></video>
-            <a href="${escapeHtml(result.video_url)}" download class="secondary-btn w-full text-xs">
-              <i class="fa-solid fa-download"></i>
-              Download Scene Video
-            </a>
+          <div class="mt-3 rounded-xl border border-brand-purple/30 bg-brand-purple/10 p-3 text-xs text-slate-300">
+            Job ${escapeHtml(created.job_id)} queued. Polling status...
           </div>
         `;
       }
-
-      setStudioProgress(100, `Scene ${scenePrompt.scene_number} video is ready.`);
-      hideStudioProgressSoon();
+      await pollVideoJob(created.job_id, scenePrompt, resultContainer);
     } catch (error) {
       showError('studio-error', error.message || 'Failed to generate scene video.');
       hideElement($('studio-progress'));
     } finally {
       setButtonLoading(button, false);
     }
+  }
+
+  async function pollVideoJob(jobId, scenePrompt, resultContainer) {
+    const maxAttempts = 60;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const job = await window.Api.getVideoJob(jobId);
+      const percent = job.status === 'success' ? 100 : Math.min(95, 55 + attempt * 2);
+      setStudioProgress(percent, `Scene ${scenePrompt.scene_number} video job: ${job.status}`);
+
+      if (resultContainer) {
+        resultContainer.innerHTML = `
+          <div class="mt-3 rounded-xl border border-brand-border bg-brand-dark/60 p-3 text-xs text-slate-300">
+            Job ${escapeHtml(job.id)} · ${escapeHtml(job.status)}
+          </div>
+        `;
+      }
+
+      if (job.status === 'success') {
+        studioState.generatedVideos += 1;
+        setText('metric-generated', String(studioState.generatedVideos));
+        setText('preview-caption', `Scene ${scenePrompt.scene_number} generated successfully.`);
+        renderVideoJobResult(job, resultContainer);
+        setStudioProgress(100, `Scene ${scenePrompt.scene_number} video is ready.`);
+        hideStudioProgressSoon();
+        return;
+      }
+
+      if (job.status === 'failed') {
+        throw new Error(job.error_message || 'Video generation failed.');
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    throw new Error('Video job is still running. Check Video Jobs later.');
+  }
+
+  function renderVideoJobResult(job, resultContainer) {
+    if (!resultContainer) return;
+
+    const asset = job.video_asset;
+    const videoUrl = asset?.video_url || '';
+    const mediaHtml = videoUrl
+      ? `
+        <video class="video-frame" src="${escapeHtml(videoUrl)}" controls playsinline></video>
+        <a href="${escapeHtml(videoUrl)}" download class="secondary-btn w-full text-xs">
+          <i class="fa-solid fa-download"></i>
+          Download Scene Video
+        </a>
+      `
+      : '<div class="rounded-xl border border-brand-teal/30 bg-brand-teal/10 p-3 text-xs text-emerald-200">Mock video job completed. Configure OPENAI_API_KEY to generate a real MP4.</div>';
+
+    resultContainer.innerHTML = `<div class="mt-3 space-y-3">${mediaHtml}</div>`;
   }
 
   function renderOutline(outline, source) {
@@ -671,7 +825,181 @@
     }
   }
 
+  function renderProfile(user) {
+    if (!user) return;
+    if ($('profile-username')) $('profile-username').value = user.username || '';
+    if ($('profile-email')) $('profile-email').value = user.email || '';
+    if ($('profile-full-name')) $('profile-full-name').value = user.full_name || '';
+    if ($('profile-company-name')) $('profile-company-name').value = user.company_name || '';
+    if ($('profile-avatar-url')) $('profile-avatar-url').value = user.avatar_url || '';
+
+    const verifiedHtml = user.email_verified
+      ? '<span class="text-brand-teal font-bold"><i class="fa-solid fa-circle-check mr-2"></i>Verified</span>'
+      : '<span class="text-brand-yellow font-bold"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Unverified</span>';
+    setHtml('profile-verification-status', verifiedHtml);
+    $('profile-resend-verification-btn')?.classList.toggle('hidden', Boolean(user.email_verified));
+
+    setHtml('profile-account-info', `
+      <div><span class="text-slate-500">Created:</span> ${escapeHtml(user.created_at || '-')}</div>
+      <div><span class="text-slate-500">Last login:</span> ${escapeHtml(user.last_login_at || '-')}</div>
+      <div><span class="text-slate-500">Role:</span> <span class="font-bold text-brand-purple">${escapeHtml(user.role || 'user')}</span></div>
+    `);
+  }
+
+  async function loadProfile() {
+    clearError('profile-error');
+    clearSuccess('profile-success');
+    try {
+      const user = await window.Api.getProfile();
+      window.authState.user = user;
+      localStorage.setItem('current_user', JSON.stringify(user));
+      renderProfile(user);
+      hydrateUserInterface();
+    } catch (error) {
+      showError('profile-error', error.message || 'Failed to load profile.');
+    }
+  }
+
+  async function handleProfileSubmit(event) {
+    event.preventDefault();
+    clearError('profile-error');
+    clearSuccess('profile-success');
+
+    const data = getFormData(event.currentTarget);
+    const payload = {
+      username: String(data.username || '').trim(),
+      full_name: String(data.full_name || '').trim() || null,
+      company_name: String(data.company_name || '').trim() || null,
+      avatar_url: String(data.avatar_url || '').trim() || null
+    };
+
+    const button = $('profile-submit-btn');
+    setButtonLoading(button, true, 'Saving profile...');
+    try {
+      const user = await window.Api.updateProfile(payload);
+      window.authState.user = user;
+      localStorage.setItem('current_user', JSON.stringify(user));
+      renderProfile(user);
+      hydrateUserInterface();
+      showSuccess('profile-success', 'Profile saved.');
+    } catch (error) {
+      showError('profile-error', error.message || 'Failed to save profile.');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function handleChangePassword(event) {
+    event.preventDefault();
+    clearError('password-error');
+    clearSuccess('password-success');
+
+    const form = event.currentTarget;
+    const data = getFormData(form);
+    const currentPassword = String(data.current_password || '');
+    const newPassword = String(data.new_password || '');
+    const confirm = String(data.new_password_confirm || '');
+
+    if (!validatePassword(newPassword)) {
+      showError('password-error', 'Password must be at least 8 characters and include uppercase, lowercase, and number.');
+      return;
+    }
+    if (newPassword !== confirm) {
+      showError('password-error', 'Password confirmation does not match.');
+      return;
+    }
+
+    const button = $('change-password-submit-btn');
+    setButtonLoading(button, true, 'Changing password...');
+    try {
+      const response = await window.Api.changePassword(currentPassword, newPassword, confirm);
+      form.reset();
+      showSuccess('password-success', response.message || 'Password changed.');
+    } catch (error) {
+      showError('password-error', error.message || 'Failed to change password.');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function handleResendVerification() {
+    clearError('profile-error');
+    clearSuccess('profile-success');
+    try {
+      const response = await window.Api.resendVerification();
+      showSuccess('profile-success', response.message || 'Verification email sent.');
+    } catch (error) {
+      showError('profile-error', error.message || 'Failed to resend verification email.');
+    }
+  }
+
+  function renderAdminRows(containerId, rows, formatter) {
+    const html = (rows || []).map((row) => `<div class="admin-row">${formatter(row)}</div>`).join('');
+    setHtml(containerId, html || '<div class="admin-row">No data yet.</div>');
+  }
+
+  function renderAdminMetrics(metrics) {
+    const items = [
+      ['Users', metrics.total_users],
+      ['Verified', metrics.verified_users],
+      ['Jobs', metrics.total_generation_jobs],
+      ['Failed', metrics.failed_jobs],
+      ['Outlines', metrics.total_generated_outlines],
+      ['Prompts', metrics.total_prompt_packages],
+      ['Videos', metrics.total_video_jobs],
+      ['Cost', `$${Number(metrics.estimated_total_cost || 0).toFixed(4)}`]
+    ];
+    setHtml('admin-metrics', items.map(([label, value]) => `
+      <div class="metric-card"><span class="metric-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>Live backend data</small></div>
+    `).join(''));
+  }
+
+  async function loadAdminDashboard() {
+    const user = window.authState.user || window.getCurrentUser?.();
+    if (!user || user.role !== 'admin') {
+      showError('admin-error', 'Admin access is required.');
+      return;
+    }
+
+    clearError('admin-error');
+    try {
+      const [metrics, users, questionnaires, jobs, assets, usage, logs, prompts] = await Promise.all([
+        window.Api.getAdminMetrics(),
+        window.Api.listAdminUsers(),
+        window.Api.listAdminQuestionnaires(),
+        window.Api.listAdminGenerationJobs(),
+        window.Api.listAdminVideoAssets(),
+        window.Api.listAdminApiUsage(),
+        window.Api.listAdminActionLogs(),
+        window.Api.getSystemPrompts()
+      ]);
+
+      renderAdminMetrics(metrics);
+      renderAdminRows('admin-users', users, (userRow) => `<strong>${escapeHtml(userRow.email)}</strong><br>${escapeHtml(userRow.username)} · ${escapeHtml(userRow.role)} · ${userRow.email_verified ? 'verified' : 'unverified'} · ${userRow.is_active ? 'active' : 'inactive'}`);
+      renderAdminRows('admin-questionnaires', questionnaires, (item) => `<strong>${escapeHtml(item.brand_name || '-')}</strong><br>User ${escapeHtml(item.user_id)} · ${escapeHtml(item.video_style || '-')}`);
+      renderAdminRows('admin-generation-jobs', jobs, (job) => `<strong>#${escapeHtml(job.id)} ${escapeHtml(job.job_type)}</strong><br>${escapeHtml(job.status)} · user ${escapeHtml(job.user_id)} · ${escapeHtml(job.provider)}`);
+      renderAdminRows('admin-video-assets', assets, (asset) => `<strong>#${escapeHtml(asset.id)} ${escapeHtml(asset.status)}</strong><br>Job ${escapeHtml(asset.generation_job_id)} · ${escapeHtml(asset.model || '-')}`);
+      renderAdminRows('admin-api-usage', usage, (item) => `<strong>${escapeHtml(item.provider)} ${escapeHtml(item.operation)}</strong><br>${escapeHtml(item.model)} · $${Number(item.estimated_cost || 0).toFixed(4)}`);
+      renderAdminRows('admin-action-logs', logs, (item) => `<strong>${escapeHtml(item.action)}</strong><br>${escapeHtml(item.target_type || '-')} ${escapeHtml(item.target_id || '')} · admin ${escapeHtml(item.admin_user_id)}`);
+      setHtml('admin-system-prompts', `
+        <div class="admin-row"><strong>Outline</strong><br>${escapeHtml((prompts.outline_system_prompt || '').slice(0, 600))}</div>
+        <div class="admin-row"><strong>Video Prompt</strong><br>${escapeHtml((prompts.video_prompt_system_prompt || '').slice(0, 600))}</div>
+      `);
+    } catch (error) {
+      showError('admin-error', error.message || 'Failed to load admin dashboard.');
+    }
+  }
+
   async function initializeApp() {
+    const params = new URLSearchParams(window.location.search);
+    const resetToken = params.get('reset_token');
+    if (resetToken) {
+      window.clearAuth();
+      showPage('page-auth');
+      showResetPasswordForm(resetToken);
+      return;
+    }
+
     await window.initAuth();
 
     if (!window.authState.isAuthenticated) {
@@ -685,8 +1013,12 @@
   function bindEvents() {
     $('login-form')?.addEventListener('submit', handleLogin);
     $('register-form')?.addEventListener('submit', handleRegister);
+    $('forgot-password-form')?.addEventListener('submit', handleForgotPassword);
+    $('reset-password-form')?.addEventListener('submit', handleResetPassword);
     $('questionnaire-form')?.addEventListener('submit', handleQuestionnaireSubmit);
     $('social-form')?.addEventListener('submit', handleSocialSubmit);
+    $('profile-form')?.addEventListener('submit', handleProfileSubmit);
+    $('change-password-form')?.addEventListener('submit', handleChangePassword);
 
     document.querySelectorAll('.questionnaire-field').forEach((field) => {
       field.addEventListener('input', updateQuestionnairePreview);
@@ -711,10 +1043,14 @@
   window.showQuestionnairePage = showQuestionnairePage;
   window.showMainPage = showMainPage;
   window.switchAuthTab = switchAuthTab;
+  window.showForgotPasswordForm = showForgotPasswordForm;
+  window.showResetPasswordForm = showResetPasswordForm;
   window.switchTab = switchTab;
   window.handleLogout = handleLogout;
   window.handleGenerateOutline = handleGenerateOutline;
   window.handleGeneratePrompts = handleGeneratePrompts;
   window.handleGenerateSceneVideo = handleGenerateSceneVideo;
+  window.handleResendVerification = handleResendVerification;
+  window.loadAdminDashboard = loadAdminDashboard;
   window.resetStudioState = resetStudioState;
 })();

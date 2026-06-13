@@ -4,6 +4,103 @@ Keeping these models in one file makes the API contract easy to understand
 and easy to change when the questionnaire grows later.
 """
 
+
+# ==================== AUTH / DATABASE MODELS ADDITION ====================
+# These SQLAlchemy ORM models back the new user authentication, questionnaire,
+# and social account features. Existing Pydantic video-generation schemas below
+# are intentionally preserved for the current AI workflow.
+
+import json
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+
+class User(Base):
+    """Application user stored in SQLite."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+
+    questionnaires: Mapped[list["Questionnaire"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    social_accounts: Mapped[list["SocialAccount"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class Questionnaire(Base):
+    """Saved brand onboarding questionnaire for one user."""
+
+    __tablename__ = "questionnaires"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    brand_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    brand_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_audience: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    video_style: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    additional_info_raw: Mapped[str | None] = mapped_column("additional_info", Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped[User] = relationship(back_populates="questionnaires")
+
+    @property
+    def additional_info(self) -> dict | None:
+        """Return additional_info JSON text as a Python dict for Pydantic responses."""
+
+        if not self.additional_info_raw:
+            return None
+        try:
+            return json.loads(self.additional_info_raw)
+        except json.JSONDecodeError:
+            return None
+
+    @additional_info.setter
+    def additional_info(self, value: dict | None) -> None:
+        """Store a Python dict as JSON text in SQLite."""
+
+        self.additional_info_raw = json.dumps(value, ensure_ascii=False) if value else None
+
+
+class SocialAccount(Base):
+    """Manual social media account link for one user."""
+
+    __tablename__ = "social_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    account_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    account_handle: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="social_accounts")
+
+# ==================== END AUTH / DATABASE MODELS ADDITION ====================
+
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator

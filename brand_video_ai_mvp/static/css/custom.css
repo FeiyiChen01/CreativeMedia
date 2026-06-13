@@ -1,0 +1,242 @@
+/* Base page helpers */
+html, body {
+  background: #06080F;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #111625;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1F2943;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #8B5CF6;
+}
+
+.auth-grid-bg {
+  background-image:
+    linear-gradient(rgba(139, 92, 246, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 92, 246, 0.08) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(circle at center, black, transparent 75%);
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: rgb(148 163 184);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.form-input,
+.form-textarea {
+  width: 100%;
+  background: rgba(6, 8, 15, 0.8);
+  border: 1px solid #1F2943;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  font-size: 0.75rem;
+  color: rgb(203 213 225);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.form-input::placeholder,
+.form-textarea::placeholder {
+  color: rgb(71 85 105);
+}
+
+.form-input:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: #8B5CF6;
+  box-shadow: 0 0 0 1px #8B5CF6;
+}
+
+.primary-btn {
+  background: linear-gradient(to right, #8B5CF6, #3B82F6);
+  color: white;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  font-weight: 700;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  box-shadow: 0 10px 25px rgba(139, 92, 246, 0.18);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.primary-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.secondary-btn {
+  background: rgba(6, 8, 15, 0.8);
+  color: rgb(203 213 225);
+  border: 1px solid #1F2943;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  font-weight: 700;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.secondary-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(139, 92, 246, 0.45);
+  color: white;
+}
+
+.auth-tab-btn {
+  border-radius: 0.75rem;
+  padding: 0.7rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: rgb(148 163 184);
+  transition: all 160ms ease;
+}
+
+.auth-tab-active {
+  color: #8B5CF6;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+}
+
+.nav-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgb(148 163 184);
+  transition: all 160ms ease;
+}
+
+.nav-btn:hover {
+  color: rgb(241 245 249);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.nav-active {
+  color: #8B5CF6;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.channel-card {
+  background: rgba(17, 22, 37, 0.8);
+  border: 1px solid rgba(31, 41, 67, 0.6);
+  padding: 0.5rem 0.25rem;
+  border-radius: 0.5rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.channel-label {
+  font-size: 9px;
+  font-weight: 800;
+  color: rgb(100 116 139);
+}
+
+.metric-card {
+  background: #111625;
+  border: 1px solid #1F2943;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-label {
+  display: block;
+  color: rgb(148 163 184);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.75rem;
+}
+
+.metric-card strong {
+  display: block;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 1.75rem;
+  color: white;
+  line-height: 1;
+}
+
+.metric-card small {
+  display: block;
+  margin-top: 0.7rem;
+  font-size: 0.7rem;
+  color: rgb(100 116 139);
+}
+
+.outline-card,
+.scene-card,
+.social-account-card {
+  background: rgba(6, 8, 15, 0.55);
+  border: 1px solid #1F2943;
+  border-radius: 1rem;
+  padding: 1rem;
+}
+
+.video-frame {
+  width: 100%;
+  border-radius: 1rem;
+  border: 1px solid #1F2943;
+  background: #06080F;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  #page-main {
+    flex-direction: column;
+  }
+
+  #page-main aside {
+    width: 100%;
+    height: auto;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+}

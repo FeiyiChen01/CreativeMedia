@@ -1,5 +1,8 @@
 """YouTube OAuth and publishing tests."""
 
+from datetime import timedelta
+import json
+
 from conftest import auth_headers, create_video_asset_and_account, register
 
 def test_youtube_oauth_connect_requires_login(client):
@@ -32,6 +35,62 @@ def test_youtube_oauth_callback_invalid_state_redirects_failed(client):
 
     assert response.status_code == 302
     assert response.headers["location"] == "/?youtube_connected=failed"
+
+
+def test_youtube_oauth_callback_merges_configured_readonly_scope(client, monkeypatch):
+    from app.core import hash_token, utc_now
+    from app.models import OAuthState, SocialAccount
+    from app.routers import social_youtube
+
+    user = register(client, "ytcallback@example.com", "ytcallback")
+    state = "callback-state"
+    with client.testing_session_local() as db:  # type: ignore[attr-defined]
+        db.add(
+            OAuthState(
+                user_id=user["user"]["id"],
+                provider="youtube",
+                state_hash=hash_token(state),
+                expires_at=utc_now() + timedelta(minutes=10),
+            )
+        )
+        db.commit()
+
+    monkeypatch.setattr(
+        social_youtube.youtube_oauth_service,
+        "exchange_code_for_tokens",
+        lambda _code: {
+            "token": "access-token",
+            "refresh_token": "refresh-token",
+            "expiry": None,
+            "scopes": ["https://www.googleapis.com/auth/youtube.upload"],
+        },
+    )
+    monkeypatch.setattr(social_youtube.youtube_oauth_service, "credentials_from_token_payload", lambda _payload: object())
+    monkeypatch.setattr(
+        social_youtube.youtube_oauth_service,
+        "get_youtube_channel_profile",
+        lambda _credentials: {
+            "platform_user_id": "UCmerged",
+            "platform_account_name": "Merged Scope Channel",
+            "account_url": "https://www.youtube.com/channel/UCmerged",
+            "metadata": {},
+        },
+    )
+    monkeypatch.setattr(social_youtube, "encrypt_token", lambda token: f"encrypted-{token}" if token else None)
+
+    response = client.get(
+        "/api/oauth/youtube/callback",
+        params={"code": "code", "state": state},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/?youtube_connected=success"
+    with client.testing_session_local() as db:  # type: ignore[attr-defined]
+        account = db.query(SocialAccount).filter_by(platform_user_id="UCmerged").one()
+        scopes = json.loads(account.scopes)
+        assert "https://www.googleapis.com/auth/youtube.upload" in scopes
+        assert "https://www.googleapis.com/auth/youtube.readonly" in scopes
 
 
 def test_youtube_upload_rejects_other_users_video_asset(client, tmp_path):

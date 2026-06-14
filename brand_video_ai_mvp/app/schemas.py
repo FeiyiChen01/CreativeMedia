@@ -233,6 +233,61 @@ class YouTubeOAuthConnectResponse(BaseModel):
     auth_url: str
 
 
+class YouTubeSocialAccountSummary(BaseModel):
+    """Safe YouTube account summary for the dashboard."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    platform: str
+    platform_user_id: str | None = None
+    platform_account_name: str | None = None
+    account_url: str | None = None
+    connection_status: str
+    last_synced_at: datetime | None = None
+    scopes: str | None = None
+
+
+class YouTubeChannelMetricResponse(BaseModel):
+    """Cached YouTube channel metrics returned to the dashboard."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    channel_id: str
+    channel_title: str
+    subscriber_count: int | None = None
+    video_count: int | None = None
+    view_count: int | None = None
+    synced_at: datetime
+
+
+class YouTubeVideoMetricResponse(BaseModel):
+    """Cached recent YouTube video metric returned to the dashboard."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    provider_video_id: str
+    title: str
+    thumbnail_url: str | None = None
+    published_at: datetime | None = None
+    view_count: int | None = None
+    like_count: int | None = None
+    comment_count: int | None = None
+    provider_url: str | None = None
+    synced_at: datetime
+
+
+class YouTubeDashboardResponse(BaseModel):
+    """Dashboard state for the current user's connected YouTube channel."""
+
+    connected: bool
+    reconnect_required: bool = False
+    social_account: YouTubeSocialAccountSummary | None = None
+    channel_metrics: YouTubeChannelMetricResponse | None = None
+    recent_videos: list[YouTubeVideoMetricResponse] = Field(default_factory=list)
+    message: str | None = None
+
+
 class YouTubeShortUploadRequest(BaseModel):
     """Request body for publishing a generated asset to YouTube via videos.insert."""
 

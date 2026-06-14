@@ -540,15 +540,91 @@
         </section>
 
         <section id="tab-dashboard" class="space-y-6 hidden">
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div class="metric-card"><span class="metric-label">Total Generated</span><strong id="metric-generated">0</strong><small>Current session</small></div>
-            <div class="metric-card"><span class="metric-label">Connected Socials</span><strong id="metric-socials">0</strong><small>Manual links</small></div>
-            <div class="metric-card"><span class="metric-label">Active Model</span><strong>Sora-2</strong><small>OpenAI video</small></div>
-            <div class="metric-card"><span class="metric-label">Profile Status</span><strong class="text-brand-teal">Ready</strong><small>Brand Profile saved</small></div>
+          <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+            <div>
+              <h2 class="font-display font-bold text-2xl text-white">YouTube Channel Dashboard</h2>
+              <p class="text-sm text-slate-400 mt-1">Monitor your connected YouTube Shorts channel performance.</p>
+            </div>
+            <button id="youtube-dashboard-refresh-btn" type="button" onclick="handleRefreshYouTubeDashboard()" class="secondary-btn hidden">
+              <i class="fa-solid fa-rotate"></i>
+              <span>Refresh YouTube Data</span>
+            </button>
           </div>
-          <div class="bg-brand-card border border-brand-border rounded-2xl p-6">
-            <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4">Brand Intelligence Summary</h3>
-            <p id="dashboard-summary" class="text-sm text-slate-400 leading-relaxed">Your brand profile will appear here after onboarding.</p>
+
+          <div id="youtube-dashboard-error" class="hidden rounded-xl border border-brand-pink/40 bg-brand-pink/10 px-4 py-3 text-sm text-rose-200"></div>
+          <div id="youtube-dashboard-success" class="hidden rounded-xl border border-brand-teal/30 bg-brand-teal/10 px-4 py-3 text-sm text-emerald-100"></div>
+
+          <div id="youtube-dashboard-empty" class="hidden bg-brand-card border border-brand-border rounded-2xl p-8 text-center space-y-4">
+            <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/10 text-red-300">
+              <i class="fa-brands fa-youtube text-xl"></i>
+            </div>
+            <div>
+              <h3 class="font-display font-bold text-lg text-white">Connect YouTube</h3>
+              <p class="text-sm text-slate-400 mt-1">Connect your YouTube account to monitor your Shorts performance.</p>
+            </div>
+            <button id="youtube-dashboard-connect-btn" type="button" onclick="handleConnectYouTubeFromDashboard()" class="primary-btn mx-auto">
+              <i class="fa-brands fa-youtube"></i>
+              <span>Connect YouTube</span>
+            </button>
+          </div>
+
+          <div id="youtube-dashboard-reconnect" class="hidden bg-brand-card border border-amber-400/30 rounded-2xl p-8 text-center space-y-4">
+            <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400/10 text-amber-200">
+              <i class="fa-solid fa-triangle-exclamation text-lg"></i>
+            </div>
+            <div>
+              <h3 class="font-display font-bold text-lg text-white">Reconnect YouTube</h3>
+              <p class="text-sm text-slate-400 mt-1">Your YouTube connection needs analytics permission. Please reconnect YouTube.</p>
+            </div>
+            <button id="youtube-dashboard-reconnect-btn" type="button" onclick="handleConnectYouTubeFromDashboard()" class="primary-btn mx-auto">
+              <i class="fa-brands fa-youtube"></i>
+              <span>Reconnect YouTube</span>
+            </button>
+          </div>
+
+          <div id="youtube-dashboard-connected-empty" class="hidden bg-brand-card border border-brand-border rounded-2xl p-8 space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <h3 class="font-display font-bold text-lg text-white">YouTube is connected</h3>
+                <p class="text-sm text-slate-400 mt-1">Click refresh to sync your latest YouTube channel metrics.</p>
+                <p id="youtube-dashboard-connected-channel" class="text-xs text-slate-500 mt-2"></p>
+              </div>
+              <button type="button" onclick="handleRefreshYouTubeDashboard()" class="primary-btn">
+                <i class="fa-solid fa-rotate"></i>
+                <span>Refresh YouTube Data</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="youtube-dashboard-content" class="hidden space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div class="metric-card"><span class="metric-label">Subscribers</span><strong id="youtube-dashboard-subscriber-count">-</strong><small>YouTube channel</small></div>
+              <div class="metric-card"><span class="metric-label">Total Public Videos</span><strong id="youtube-dashboard-video-count">-</strong><small>All uploaded public videos</small></div>
+              <div class="metric-card"><span class="metric-label">Total Channel Views</span><strong id="youtube-dashboard-view-count">-</strong><small>Lifetime views</small></div>
+              <div class="metric-card"><span class="metric-label">Connected Channel</span><strong id="youtube-dashboard-channel-name" class="text-base leading-tight">-</strong><small id="youtube-dashboard-last-synced">Last synced: -</small></div>
+            </div>
+
+            <div class="bg-brand-card border border-brand-border rounded-2xl overflow-hidden">
+              <div class="px-6 py-4 border-b border-brand-border flex items-center justify-between gap-4">
+                <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">Recent Videos</h3>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead class="text-xs uppercase tracking-wider text-slate-500 bg-brand-dark/40">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-semibold">Thumbnail</th>
+                      <th class="px-4 py-3 text-left font-semibold">Title</th>
+                      <th class="px-4 py-3 text-left font-semibold">Published Date</th>
+                      <th class="px-4 py-3 text-right font-semibold">Views</th>
+                      <th class="px-4 py-3 text-right font-semibold">Likes</th>
+                      <th class="px-4 py-3 text-right font-semibold">Comments</th>
+                      <th class="px-4 py-3 text-right font-semibold">Link</th>
+                    </tr>
+                  </thead>
+                  <tbody id="youtube-dashboard-recent-videos" class="divide-y divide-brand-border text-slate-300"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </section>
 

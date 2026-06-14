@@ -522,8 +522,6 @@
     setText('studio-video-style', questionnaire.brand_tone || questionnaire.video_style || '-');
     setText('studio-target-audience', questionnaire.industry || questionnaire.target_audience || '-');
     setText('studio-brand-description', questionnaire.brand_description || '-');
-
-    setText('dashboard-summary', `${questionnaire.company_name || questionnaire.brand_name || 'Your company'} operates in ${questionnaire.industry || questionnaire.target_audience || 'your industry'} with a ${questionnaire.brand_tone || questionnaire.video_style || 'custom'} brand tone. ${questionnaire.brand_description || ''}`);
   }
 
   function switchTab(tabId) {
@@ -535,7 +533,7 @@
     });
 
     const titles = {
-      dashboard: '品牌全渠道监控看板',
+      dashboard: 'YouTube Channel Dashboard',
       studio: 'AI 创作实验室',
       social: '关联社交媒体',
       calendar: '多端自动发布排期',
@@ -547,6 +545,9 @@
     if (tabId === 'social') {
       loadSocialAccounts();
     }
+    if (tabId === 'dashboard') {
+      loadYouTubeDashboard();
+    }
     if (tabId === 'studio') {
       loadYouTubePublishingData();
     }
@@ -555,6 +556,161 @@
     }
     if (tabId === 'admin') {
       loadAdminDashboard();
+    }
+  }
+
+  function formatMetricNumber(value) {
+    if (value === null || value === undefined || value === '') return '-';
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '-';
+    return new Intl.NumberFormat('en-US').format(number);
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString([], {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function hideYouTubeDashboardStates() {
+    [
+      'youtube-dashboard-empty',
+      'youtube-dashboard-reconnect',
+      'youtube-dashboard-connected-empty',
+      'youtube-dashboard-content'
+    ].forEach((id) => hideElement($(id)));
+  }
+
+  async function loadYouTubeDashboard() {
+    if (!window.authState.isAuthenticated) return;
+    clearError('youtube-dashboard-error');
+
+    try {
+      const data = await window.Api.getYouTubeDashboard();
+      renderYouTubeDashboard(data);
+    } catch (error) {
+      hideYouTubeDashboardStates();
+      showError('youtube-dashboard-error', error.message || 'Failed to load YouTube dashboard.');
+    }
+  }
+
+  function renderYouTubeDashboard(data) {
+    hideYouTubeDashboardStates();
+    clearError('youtube-dashboard-error');
+
+    const refreshButton = $('youtube-dashboard-refresh-btn');
+    if (refreshButton) refreshButton.classList.toggle('hidden', !data?.connected || data?.reconnect_required);
+
+    if (!data || !data.connected) {
+      showElement($('youtube-dashboard-empty'));
+      return;
+    }
+
+    const account = data.social_account || {};
+    const channelName = account.platform_account_name || account.account_handle || account.platform_user_id || 'YouTube Channel';
+
+    if (data.reconnect_required) {
+      showElement($('youtube-dashboard-reconnect'));
+      return;
+    }
+
+    if (!data.channel_metrics) {
+      setText('youtube-dashboard-connected-channel', `Connected channel: ${channelName}`);
+      showElement($('youtube-dashboard-connected-empty'));
+      return;
+    }
+
+    const metrics = data.channel_metrics;
+    setText('youtube-dashboard-subscriber-count', metrics.subscriber_count === null || metrics.subscriber_count === undefined ? 'Hidden' : formatMetricNumber(metrics.subscriber_count));
+    setText('youtube-dashboard-video-count', formatMetricNumber(metrics.video_count));
+    setText('youtube-dashboard-view-count', formatMetricNumber(metrics.view_count));
+    setText('youtube-dashboard-channel-name', metrics.channel_title || channelName);
+    setText('youtube-dashboard-last-synced', `Last synced: ${formatDateTime(metrics.synced_at || account.last_synced_at)}`);
+    renderYouTubeRecentVideos(data.recent_videos || []);
+    showElement($('youtube-dashboard-content'));
+  }
+
+  function renderYouTubeRecentVideos(videos) {
+    if (!videos.length) {
+      setHtml('youtube-dashboard-recent-videos', `
+        <tr>
+          <td colspan="7" class="px-4 py-8 text-center text-slate-500">No recent YouTube videos found yet.</td>
+        </tr>
+      `);
+      return;
+    }
+
+    setHtml('youtube-dashboard-recent-videos', videos.map((video) => {
+      const thumbnail = video.thumbnail_url
+        ? `<img src="${escapeHtml(video.thumbnail_url)}" alt="" class="h-12 w-20 rounded-lg object-cover border border-brand-border">`
+        : `<div class="h-12 w-20 rounded-lg border border-brand-border bg-brand-dark/70 flex items-center justify-center text-red-300"><i class="fa-brands fa-youtube"></i></div>`;
+      const link = video.provider_url
+        ? `<a href="${escapeHtml(video.provider_url)}" target="_blank" rel="noopener" class="text-brand-purple hover:underline">Open</a>`
+        : '-';
+      return `
+        <tr>
+          <td class="px-4 py-3">${thumbnail}</td>
+          <td class="px-4 py-3 min-w-[220px]"><div class="font-semibold text-white">${escapeHtml(video.title || 'Untitled YouTube video')}</div></td>
+          <td class="px-4 py-3 whitespace-nowrap text-slate-400">${escapeHtml(formatDateTime(video.published_at))}</td>
+          <td class="px-4 py-3 text-right">${escapeHtml(formatMetricNumber(video.view_count))}</td>
+          <td class="px-4 py-3 text-right">${escapeHtml(formatMetricNumber(video.like_count))}</td>
+          <td class="px-4 py-3 text-right">${escapeHtml(formatMetricNumber(video.comment_count))}</td>
+          <td class="px-4 py-3 text-right">${link}</td>
+        </tr>
+      `;
+    }).join(''));
+  }
+
+  async function handleRefreshYouTubeDashboard() {
+    clearError('youtube-dashboard-error');
+    clearSuccess('youtube-dashboard-success');
+    const button = $('youtube-dashboard-refresh-btn');
+    setButtonLoading(button, true, 'Refreshing...');
+
+    try {
+      const data = await window.Api.refreshYouTubeDashboard();
+      renderYouTubeDashboard(data);
+      showSuccess('youtube-dashboard-success', 'YouTube data refreshed.');
+      await loadSocialAccounts();
+    } catch (error) {
+      const body = error.body || {};
+      if (body.reconnect_required || body.error_code === 'YOUTUBE_RECONNECT_REQUIRED') {
+        renderYouTubeDashboard({
+          connected: true,
+          reconnect_required: true,
+          social_account: body.social_account || null,
+          channel_metrics: null,
+          recent_videos: [],
+          message: body.detail || 'Please reconnect YouTube to enable analytics access.'
+        });
+      }
+      showError('youtube-dashboard-error', error.message || 'Failed to refresh YouTube dashboard.');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function handleConnectYouTubeFromDashboard() {
+    clearError('youtube-dashboard-error');
+    clearSuccess('youtube-dashboard-success');
+    const connectButton = $('youtube-dashboard-connect-btn');
+    const reconnectButton = $('youtube-dashboard-reconnect-btn');
+    setButtonLoading(connectButton, true, 'Connecting...');
+    setButtonLoading(reconnectButton, true, 'Connecting...');
+    try {
+      const response = await window.Api.connectYouTube();
+      window.location.href = response.auth_url;
+    } catch (error) {
+      showError('youtube-dashboard-error', error.message || 'Could not start YouTube OAuth.');
+      setButtonLoading(connectButton, false);
+      setButtonLoading(reconnectButton, false);
     }
   }
 
@@ -706,7 +862,6 @@
 
       if (job.status === 'success') {
         studioState.generatedVideos += 1;
-        setText('metric-generated', String(studioState.generatedVideos));
         setText('preview-caption', `Scene ${scenePrompt.scene_number} generated successfully.`);
         renderVideoJobResult(job, resultContainer);
         setStudioProgress(100, `Scene ${scenePrompt.scene_number} video is ready.`);
@@ -829,7 +984,6 @@
 
   function renderSocialAccounts() {
     const accounts = studioState.socialAccounts || [];
-    setText('metric-socials', String(accounts.length));
 
     const connectedYouTube = getConnectedYouTubeAccount();
     setText('ig-status', accounts.some((item) => item.platform === 'instagram') ? '已绑定' : '待绑定');
@@ -1364,12 +1518,12 @@
 
     await routeAfterAuth(false);
     if (studioState.pendingYouTubeStatus === 'success') {
-      switchTab('social');
-      showSuccess('youtube-connect-message', 'YouTube connected successfully.');
+      switchTab('dashboard');
+      showSuccess('youtube-dashboard-success', 'YouTube connected successfully. Click refresh to sync metrics.');
       studioState.pendingYouTubeStatus = null;
     } else if (studioState.pendingYouTubeStatus === 'failed') {
-      switchTab('social');
-      showError('youtube-connect-error', 'YouTube connection failed. Please try again.');
+      switchTab('dashboard');
+      showError('youtube-dashboard-error', 'YouTube connection failed. Please try again.');
       studioState.pendingYouTubeStatus = null;
     }
   }
@@ -1420,6 +1574,12 @@
   window.handleGenerateSceneVideo = handleGenerateSceneVideo;
   window.handleYouTubeConnect = handleYouTubeConnect;
   window.handleYouTubeDisconnect = handleYouTubeDisconnect;
+  window.loadYouTubeDashboard = loadYouTubeDashboard;
+  window.renderYouTubeDashboard = renderYouTubeDashboard;
+  window.handleRefreshYouTubeDashboard = handleRefreshYouTubeDashboard;
+  window.handleConnectYouTubeFromDashboard = handleConnectYouTubeFromDashboard;
+  window.formatMetricNumber = formatMetricNumber;
+  window.formatDateTime = formatDateTime;
   window.handleResendVerification = handleResendVerification;
   window.handleBrandLogoUpload = handleBrandLogoUpload;
   window.handleAvatarUpload = handleAvatarUpload;

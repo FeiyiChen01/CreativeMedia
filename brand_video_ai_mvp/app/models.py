@@ -89,6 +89,14 @@ class User(Base):
     )
     api_usage_logs: Mapped[list["ApiUsageLog"]] = relationship(back_populates="user")
     admin_action_logs: Mapped[list["AdminActionLog"]] = relationship(back_populates="admin_user")
+    youtube_channel_metrics: Mapped[list["YouTubeChannelMetric"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    youtube_video_metrics: Mapped[list["YouTubeVideoMetric"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class Questionnaire(Base):
@@ -168,6 +176,14 @@ class SocialAccount(Base):
 
     user: Mapped[User] = relationship(back_populates="social_accounts")
     publishing_jobs: Mapped[list["PublishingJob"]] = relationship(back_populates="social_account")
+    youtube_channel_metrics: Mapped[list["YouTubeChannelMetric"]] = relationship(
+        back_populates="social_account",
+        cascade="all, delete-orphan",
+    )
+    youtube_video_metrics: Mapped[list["YouTubeVideoMetric"]] = relationship(
+        back_populates="social_account",
+        cascade="all, delete-orphan",
+    )
 
 
 class OAuthState(Base):
@@ -382,3 +398,60 @@ class AdminActionLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     admin_user: Mapped[User] = relationship(back_populates="admin_action_logs")
+
+
+class YouTubeChannelMetric(Base):
+    """Cached YouTube channel metrics for the dashboard."""
+
+    __tablename__ = "youtube_channel_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    social_account_id: Mapped[int] = mapped_column(ForeignKey("social_accounts.id"), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(50), default="youtube", server_default="youtube", nullable=False, index=True)
+    channel_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    channel_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    subscriber_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    video_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    view_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    raw_response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped[User] = relationship(back_populates="youtube_channel_metrics")
+    social_account: Mapped[SocialAccount] = relationship(back_populates="youtube_channel_metrics")
+
+
+class YouTubeVideoMetric(Base):
+    """Cached recent YouTube video metrics for the dashboard."""
+
+    __tablename__ = "youtube_video_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    social_account_id: Mapped[int] = mapped_column(ForeignKey("social_accounts.id"), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(50), default="youtube", server_default="youtube", nullable=False, index=True)
+    provider_video_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    thumbnail_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    view_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    like_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comment_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    raw_response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped[User] = relationship(back_populates="youtube_video_metrics")
+    social_account: Mapped[SocialAccount] = relationship(back_populates="youtube_video_metrics")

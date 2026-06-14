@@ -12,7 +12,7 @@ The current stack is:
 - Brand Profile / Company Profile with logo upload
 - Admin dashboard
 - Async video generation jobs
-- YouTube OAuth connection and Shorts publishing through YouTube Data API v3
+- YouTube OAuth connection, Shorts publishing, and channel dashboard metrics through YouTube Data API v3
 - SQLAlchemy ORM models with Pydantic API schemas
 - Alembic migrations with SQLite locally and Neon PostgreSQL on Render
 
@@ -76,11 +76,13 @@ YouTube variables:
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_OAUTH_REDIRECT_URI=http://localhost:8000/api/oauth/youtube/callback
-GOOGLE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.upload
+GOOGLE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly
 TOKEN_ENCRYPTION_KEY=
 YOUTUBE_UPLOAD_DEFAULT_PRIVACY_STATUS=private
 YOUTUBE_UPLOAD_ALLOW_PUBLIC=false
 ```
+
+The `youtube.readonly` scope is required for the YouTube Channel Dashboard. Users who connected YouTube before this scope was added need to reconnect YouTube before dashboard metrics can sync.
 
 ## Local Setup
 
@@ -110,8 +112,10 @@ To test YouTube locally:
 1. Register or log in.
 2. Complete the brand questionnaire.
 3. Open Social Accounts and click Connect YouTube.
-4. Generate or prepare a `VideoAsset` with a local video file.
-5. Open Studio and use Publish to YouTube Shorts.
+4. If the account was connected before `youtube.readonly` was added, reconnect YouTube.
+5. Open Dashboard and click Refresh YouTube Data to sync metrics.
+6. Generate or prepare a `VideoAsset` with a local video file.
+7. Open Studio and use Publish to YouTube Shorts.
 
 Run tests:
 
@@ -126,6 +130,7 @@ Tests are split by feature area:
 - `tests/test_brand_profile.py`
 - `tests/test_generation.py`
 - `tests/test_youtube.py`
+- `tests/test_youtube_dashboard.py`
 - `tests/test_admin.py`
 
 ## Render + Neon Setup
@@ -173,7 +178,7 @@ LOCAL_VIDEO_STORAGE_DIR=static/generated_videos
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_OAUTH_REDIRECT_URI=https://your-render-service.onrender.com/api/oauth/youtube/callback
-GOOGLE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.upload
+GOOGLE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly
 TOKEN_ENCRYPTION_KEY=use-a-long-random-secret
 YOUTUBE_UPLOAD_DEFAULT_PRIVACY_STATUS=private
 YOUTUBE_UPLOAD_ALLOW_PUBLIC=false
@@ -218,6 +223,17 @@ https://your-render-domain.com/api/oauth/youtube/callback
 
 The app uses the server-side OAuth web flow. The frontend receives only an authorization URL; Google tokens are exchanged and encrypted by the FastAPI backend. YouTube Shorts does not have a separate upload API. This app uploads videos with `videos.insert`; YouTube classifies eligible vertical short videos as Shorts.
 
+The YouTube Channel Dashboard reads cached metrics from the local database and only calls YouTube when the user clicks Refresh YouTube Data. Refreshing consumes YouTube Data API quota.
+
+Dashboard currently shows:
+
+- Subscribers
+- Total Public Videos
+- Total Channel Views
+- Connected Channel
+- Recent Videos
+- Last Synced At
+
 ## Main API Flow
 
 - `POST /api/auth/register`
@@ -235,6 +251,8 @@ The app uses the server-side OAuth web flow. The frontend receives only an autho
 - `GET /api/video-jobs/{job_id}`
 - `GET /api/oauth/youtube/connect`
 - `GET /api/oauth/youtube/callback`
+- `GET /api/dashboard/youtube`
+- `POST /api/dashboard/youtube/refresh`
 - `POST /api/youtube/shorts/upload`
 - `GET /api/publishing-jobs`
 - `GET /api/admin/api-usage`
@@ -247,6 +265,8 @@ Generation creates traceable records:
 - `GeneratedPromptPackage`
 - `VideoAsset`
 - `PublishingJob`
+- `YouTubeChannelMetric`
+- `YouTubeVideoMetric`
 - `ApiUsageLog`
 - `AdminActionLog` for admin user changes
 
@@ -258,7 +278,7 @@ Alembic is the source of truth for database schema changes:
 alembic upgrade head
 ```
 
-The first migration creates the current MVP schema for empty databases. If a database already has the `users` table, the initial migration treats it as an existing baseline and records the Alembic version without trying to recreate tables. Future field/table changes should be added as new Alembic revisions instead of relying on deleting `test.db`. The app still calls `Base.metadata.create_all(bind=engine)` on startup for local MVP convenience and keeps a small SQLite compatibility helper for older local databases. Do not delete production data.
+The first migration creates the current MVP schema for empty databases. If a database already has the `users` table, the initial migration treats it as an existing baseline and records the Alembic version without trying to recreate tables. Phase 2 adds YouTube metrics tables through `20260614_0002_youtube_dashboard_metrics.py`. Future field/table changes should be added as new Alembic revisions instead of relying on deleting `test.db`. The app still calls `Base.metadata.create_all(bind=engine)` on startup for local MVP convenience and keeps a small SQLite compatibility helper for older local databases. If an old local SQLite `test.db` is missing new tables, run `alembic upgrade head`; for local-only throwaway data, deleting `test.db` and restarting the app is also acceptable. Do not delete production data.
 
 To create a future migration after changing SQLAlchemy models:
 
@@ -273,7 +293,7 @@ alembic upgrade head
 pytest -q
 ```
 
-Tests use isolated temporary SQLite databases and mock AI behavior. They do not send real SMTP, call Render/Neon, or make paid OpenAI video requests.
+Tests use isolated temporary SQLite databases and mock AI/YouTube behavior. They do not send real SMTP, call Render/Neon, call Google/YouTube APIs, or make paid OpenAI video requests.
 
 ## Security Notes
 
@@ -281,6 +301,7 @@ Tests use isolated temporary SQLite databases and mock AI behavior. They do not 
 - Do not commit `.env`, `test.db`, `.venv`, `youtubeAPI.json`, generated videos, API keys, or credentials.
 - Do not use `youtubeAPI.json` as the production OAuth solution.
 - OAuth access tokens and refresh tokens are encrypted before database storage.
+- YouTube dashboard API responses never include access tokens or refresh tokens.
 - Keep development uploads private unless you deliberately enable public uploads with `YOUTUBE_UPLOAD_ALLOW_PUBLIC=true`.
 - Use a strong unique `JWT_SECRET_KEY` in production.
 - Keep `CORS_ALLOWED_ORIGINS` explicit in production.
@@ -290,5 +311,7 @@ Tests use isolated temporary SQLite databases and mock AI behavior. They do not 
 ## Current Limitations
 
 - This release only integrates YouTube. Instagram, TikTok, and Xiaohongshu can be added later.
+- The dashboard currently supports YouTube only. Instagram and Xiaohongshu metrics are not implemented.
+- YouTube dashboard metrics are cached and are not real-time; they update only after Refresh YouTube Data.
 - Production YouTube usage may require Google OAuth verification and YouTube API quota review.
 - Render local filesystem storage is not durable, so production publishing should use persistent object storage for generated videos.

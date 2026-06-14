@@ -10,7 +10,7 @@ from app.services.token_crypto_service import decrypt_token, encrypt_token
 
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
-DEFAULT_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+DEFAULT_SCOPE = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
 
 
 class YouTubeOAuthError(RuntimeError):
@@ -22,6 +22,12 @@ def _scopes() -> list[str]:
 
     configured = os.getenv("GOOGLE_OAUTH_SCOPES", DEFAULT_SCOPE)
     return [scope.strip() for scope in configured.replace(",", " ").split() if scope.strip()]
+
+
+def configured_scopes() -> list[str]:
+    """Return configured OAuth scopes for persistence and diagnostics."""
+
+    return _scopes()
 
 
 def _client_config() -> dict[str, Any]:
@@ -186,3 +192,13 @@ def serialize_scopes(scopes: list[str] | tuple[str, ...] | None = None) -> str:
     """Serialize scopes as JSON text for the SocialAccount row."""
 
     return json.dumps(list(scopes or _scopes()), ensure_ascii=False)
+
+
+def merge_with_configured_scopes(scopes: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    """Merge granted scopes with configured scopes, preserving order."""
+
+    merged: list[str] = []
+    for scope in list(scopes or []) + configured_scopes():
+        if scope and scope not in merged:
+            merged.append(scope)
+    return merged

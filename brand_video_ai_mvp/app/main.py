@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core import STATIC_DIR, get_cors_allowed_origins, json_safe
 from app.database import init_db
-from app.routers import admin, auth, brand_profile, generation, social_youtube
+from app.routers import admin, auth, brand_profile, generation, social_youtube, youtube_dashboard
 from app.routers.generation import run_video_generation_job
 from app.services.email_service import EmailService
 
@@ -91,5 +91,6 @@ def health_check() -> dict[str, str]:
 app.include_router(auth.router)
 app.include_router(brand_profile.router)
 app.include_router(social_youtube.router)
+app.include_router(youtube_dashboard.router)
 app.include_router(generation.router)
 app.include_router(admin.router)

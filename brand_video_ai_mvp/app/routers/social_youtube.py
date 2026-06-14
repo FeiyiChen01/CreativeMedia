@@ -189,7 +189,9 @@ def youtube_oauth_callback(
         if refresh_token:
             account.refresh_token_encrypted = encrypt_token(refresh_token)
         account.token_expires_at = token_payload.get("expiry")
-        account.scopes = youtube_oauth_service.serialize_scopes(token_payload.get("scopes"))
+        account.scopes = youtube_oauth_service.serialize_scopes(
+            youtube_oauth_service.merge_with_configured_scopes(token_payload.get("scopes"))
+        )
         account.connection_status = "connected"
         account.last_synced_at = utc_now()
         account.updated_at = utc_now()
@@ -362,5 +364,4 @@ def get_publishing_job(
         )
     return PublishingJobResponse.model_validate(job)
 # ==================== END AUTH ADDITION ====================
-
 

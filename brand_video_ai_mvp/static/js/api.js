@@ -224,6 +224,14 @@
     return apiFetch('/api/oauth/youtube/connect', { method: 'GET' }, true);
   }
 
+  async function getYouTubeDashboard() {
+    return apiFetch('/api/dashboard/youtube', { method: 'GET' }, true);
+  }
+
+  async function refreshYouTubeDashboard() {
+    return apiFetch('/api/dashboard/youtube/refresh', { method: 'POST' }, true);
+  }
+
   async function deleteSocialAccount(accountId) {
     return apiFetch(`/api/social-accounts/${accountId}`, { method: 'DELETE' }, true);
   }
@@ -344,6 +352,8 @@
     listSocialAccounts,
     addSocialAccount,
     connectYouTube,
+    getYouTubeDashboard,
+    refreshYouTubeDashboard,
     deleteSocialAccount,
     listVideoAssets,
     uploadYouTubeShort,

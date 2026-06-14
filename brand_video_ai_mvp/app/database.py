@@ -55,6 +55,14 @@ def _add_missing_sqlite_columns() -> None:
             "is_active": "BOOLEAN NOT NULL DEFAULT 1",
             "last_login_at": "DATETIME",
         },
+        "questionnaires": {
+            "company_name": "VARCHAR(255)",
+            "industry": "VARCHAR(255)",
+            "brand_tone": "VARCHAR(100)",
+            "logo_url": "VARCHAR(500)",
+            "logo_path": "VARCHAR(1000)",
+            "use_logo_in_prompt": "BOOLEAN NOT NULL DEFAULT 0",
+        },
         "video_assets": {
             "prompt_package_id": "INTEGER",
             "storage_backend": "VARCHAR(50)",

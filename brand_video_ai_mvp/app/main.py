@@ -14,7 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -61,18 +61,22 @@ from app.schemas import (
     AdminActionLogResponse,
     AdminUserUpdateRequest,
     ApiUsageLogResponse,
+    BrandProfileRequest,
+    BrandProfileResponse,
     ChangePasswordRequest,
     ForgotPasswordRequest,
     GeneratedOutlineResponse,
     GeneratedPromptPackageResponse,
     GenerationJobResponse,
     MessageResponse,
+    ProfileResponse,
     ProfileUpdateRequest,
     PublishingJobResponse,
     ResetPasswordRequest,
     SocialAccountRequest,
     SocialAccountResponse,
     TokenResponse,
+    UploadResponse,
     UserLogin,
     UserRegister,
     UserResponse,
@@ -97,6 +101,12 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 APP_ENV = os.getenv("APP_ENV", "development").lower()
+MAX_PROFILE_UPLOAD_BYTES = 5 * 1024 * 1024
+ALLOWED_PROFILE_IMAGE_TYPES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+}
 
 
 def parse_csv_env(value: str | None) -> list[str]:
@@ -140,6 +150,12 @@ def get_local_video_storage_dir() -> Path:
     return path if path.is_absolute() else BASE_DIR / path
 
 
+def get_user_upload_dir(user_id: int) -> Path:
+    """Return a per-user static upload directory for profile-owned media."""
+
+    return STATIC_DIR / "uploads" / "users" / str(user_id)
+
+
 def utc_now() -> datetime:
     """Return the current UTC time."""
 
@@ -173,6 +189,58 @@ def model_to_json(value: object) -> str:
     if hasattr(value, "model_dump"):
         value = value.model_dump()
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def build_profile_response(user: User) -> ProfileResponse:
+    """Build a profile response with display names and without email."""
+
+    full_name = (user.full_name or "").strip() or None
+    company_name = (user.company_name or "").strip() or None
+    display_name = full_name or company_name or user.username
+    return ProfileResponse(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        full_name=full_name,
+        company_name=company_name,
+        avatar_url=user.avatar_url,
+        phone=user.phone,
+        email_verified=user.email_verified,
+        email_verified_at=user.email_verified_at,
+        role=user.role,
+        is_active=user.is_active,
+        last_login_at=user.last_login_at,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+        display_name=display_name,
+        display_company_name=company_name if full_name and company_name else None,
+    )
+
+
+def save_upload_file(file: UploadFile, user_id: int, stem: str) -> tuple[str, str]:
+    """Validate and save a small user-owned image under static/uploads."""
+
+    extension = ALLOWED_PROFILE_IMAGE_TYPES.get((file.content_type or "").lower())
+    if extension is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"detail": "Only png, jpg, jpeg, or webp images are allowed.", "error_code": "INVALID_IMAGE_TYPE"},
+        )
+
+    contents = file.file.read(MAX_PROFILE_UPLOAD_BYTES + 1)
+    if len(contents) > MAX_PROFILE_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"detail": "Image must be 5MB or smaller.", "error_code": "IMAGE_TOO_LARGE"},
+        )
+
+    upload_dir = get_user_upload_dir(user_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{stem}-{secrets.token_hex(8)}{extension}"
+    target_path = upload_dir / filename
+    target_path.write_bytes(contents)
+    url = f"/static/uploads/users/{user_id}/{filename}"
+    return str(target_path), url
 
 
 def parse_json_text(value: str | None) -> object | None:
@@ -622,9 +690,12 @@ def save_questionnaire(
         db.add(questionnaire)
 
     questionnaire.brand_name = payload.brand_name
+    questionnaire.company_name = payload.brand_name
     questionnaire.brand_description = payload.brand_description
     questionnaire.target_audience = payload.target_audience
     questionnaire.video_style = payload.video_style
+    questionnaire.industry = payload.additional_info.get("industry") if payload.additional_info else questionnaire.industry
+    questionnaire.brand_tone = payload.video_style
     questionnaire.additional_info = payload.additional_info
 
     db.commit()
@@ -633,19 +704,124 @@ def save_questionnaire(
 # ==================== END AUTH ADDITION ====================
 
 
-@app.get("/api/profile", response_model=UserResponse)
-def get_profile(current_user: User = Depends(get_current_user)) -> UserResponse:
+def get_current_brand_profile(db: Session, user_id: int) -> Questionnaire | None:
+    """Return the latest Brand Profile row for a user."""
+
+    return db.scalar(
+        select(Questionnaire)
+        .where(Questionnaire.user_id == user_id)
+        .order_by(Questionnaire.updated_at.desc(), Questionnaire.id.desc())
+    )
+
+
+def upsert_brand_profile(db: Session, user: User, payload: BrandProfileRequest) -> Questionnaire:
+    """Create or update the compatibility questionnaire row as a Brand Profile."""
+
+    profile = get_current_brand_profile(db, user.id)
+    if profile is None:
+        profile = Questionnaire(user_id=user.id)
+        db.add(profile)
+
+    company_name = payload.company_name.strip()
+    industry = payload.industry.strip()
+    profile.company_name = company_name
+    profile.brand_name = company_name
+    profile.industry = industry
+    profile.brand_description = payload.brand_description.strip()
+    profile.brand_tone = payload.brand_tone
+    profile.video_style = payload.brand_tone
+    profile.use_logo_in_prompt = bool(payload.use_logo_in_prompt and profile.logo_url)
+    profile.target_audience = industry
+    profile.additional_info = {
+        "source": "brand_profile",
+        "industry": industry,
+        "use_logo_requested": payload.use_logo_in_prompt,
+        "logo_prompt_instruction": (
+            "Subtly include the brand logo in the final end card or closing visual."
+            if payload.use_logo_in_prompt and profile.logo_url
+            else None
+        ),
+    }
+
+    user.company_name = company_name
+    db.commit()
+    db.refresh(profile)
+    db.refresh(user)
+    return profile
+
+
+@app.get("/api/brand-profile", response_model=BrandProfileResponse | None)
+def get_brand_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BrandProfileResponse | None:
+    """Return the current user's Brand Profile."""
+
+    profile = get_current_brand_profile(db, current_user.id)
+    return BrandProfileResponse.model_validate(profile) if profile else None
+
+
+@app.post("/api/brand-profile", response_model=BrandProfileResponse, status_code=status.HTTP_201_CREATED)
+def create_brand_profile(
+    payload: BrandProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BrandProfileResponse:
+    """Create or update the current user's Brand Profile."""
+
+    profile = upsert_brand_profile(db, current_user, payload)
+    return BrandProfileResponse.model_validate(profile)
+
+
+@app.put("/api/brand-profile", response_model=BrandProfileResponse)
+def update_brand_profile(
+    payload: BrandProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BrandProfileResponse:
+    """Update the current user's Brand Profile."""
+
+    profile = upsert_brand_profile(db, current_user, payload)
+    return BrandProfileResponse.model_validate(profile)
+
+
+@app.post("/api/brand-profile/logo", response_model=BrandProfileResponse)
+def upload_brand_profile_logo(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BrandProfileResponse:
+    """Upload and attach a logo to the current user's Brand Profile."""
+
+    profile = get_current_brand_profile(db, current_user.id)
+    if profile is None:
+        profile = Questionnaire(user_id=current_user.id)
+        db.add(profile)
+        db.flush()
+
+    logo_path, logo_url = save_upload_file(file, current_user.id, "brand-logo")
+    profile.logo_path = logo_path
+    profile.logo_url = logo_url
+    if profile.additional_info:
+        profile.additional_info = {**profile.additional_info, "logo_url": logo_url}
+    db.commit()
+    db.refresh(profile)
+    return BrandProfileResponse.model_validate(profile)
+
+
+@app.get("/api/profile", response_model=ProfileResponse)
+def get_profile(current_user: User = Depends(get_current_user)) -> ProfileResponse:
     """Return the current user's account profile."""
 
-    return UserResponse.model_validate(current_user)
+    return build_profile_response(current_user)
 
 
-@app.patch("/api/profile", response_model=UserResponse)
+@app.patch("/api/profile", response_model=ProfileResponse)
 def update_profile(
     payload: ProfileUpdateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> UserResponse:
+) -> ProfileResponse:
     """Update profile fields that are safe for users to manage."""
 
     if payload.username and payload.username != current_user.username:
@@ -659,6 +835,20 @@ def update_profile(
             )
         current_user.username = payload.username
 
+    if payload.email and payload.email.lower().strip() != current_user.email:
+        email = payload.email.lower().strip()
+        existing_user = db.scalar(
+            select(User).where(User.email == email, User.id != current_user.id)
+        )
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"detail": "Email is already taken.", "error_code": "EMAIL_TAKEN"},
+            )
+        current_user.email = email
+        current_user.email_verified = False
+        current_user.email_verified_at = None
+
     if payload.full_name is not None:
         current_user.full_name = payload.full_name.strip() or None
     if payload.company_name is not None:
@@ -668,7 +858,33 @@ def update_profile(
 
     db.commit()
     db.refresh(current_user)
-    return UserResponse.model_validate(current_user)
+    return build_profile_response(current_user)
+
+
+@app.put("/api/profile", response_model=ProfileResponse)
+def put_profile(
+    payload: ProfileUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProfileResponse:
+    """PUT alias for updating profile settings."""
+
+    return update_profile(payload, current_user, db)
+
+
+@app.post("/api/profile/avatar", response_model=UploadResponse)
+def upload_profile_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UploadResponse:
+    """Upload an avatar for the current user's profile."""
+
+    _avatar_path, avatar_url = save_upload_file(file, current_user.id, "avatar")
+    current_user.avatar_url = avatar_url
+    db.commit()
+    db.refresh(current_user)
+    return UploadResponse(url=avatar_url)
 
 
 @app.post("/api/profile/change-password", response_model=MessageResponse)

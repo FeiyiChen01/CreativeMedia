@@ -81,6 +81,41 @@ class UserResponse(BaseModel):
     updated_at: datetime
 
 
+class ProfileResponse(BaseModel):
+    """Profile payload for account settings."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: EmailStr
+    username: str
+    full_name: str | None = None
+    company_name: str | None = None
+    avatar_url: str | None = None
+    phone: str | None = None
+    email_verified: bool = False
+    email_verified_at: datetime | None = None
+    role: Literal["user", "admin"] = "user"
+    is_active: bool = True
+    last_login_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    display_name: str
+    display_company_name: str | None = None
+
+
+BRAND_TONES = (
+    "Professional",
+    "Friendly",
+    "Luxury",
+    "Bold",
+    "Playful",
+    "Educational",
+    "Minimal",
+    "Inspirational",
+)
+
+
 class TokenResponse(BaseModel):
     """JWT response returned after register/login."""
 
@@ -106,6 +141,25 @@ class QuestionnaireRequest(BaseModel):
     additional_info: dict[str, Any] | None = None
 
 
+class BrandProfileRequest(BaseModel):
+    """Company profile stored during onboarding."""
+
+    company_name: str = Field(..., min_length=1, max_length=255)
+    industry: str = Field(..., min_length=1, max_length=255)
+    brand_description: str = Field(..., min_length=1)
+    brand_tone: Literal[
+        "Professional",
+        "Friendly",
+        "Luxury",
+        "Bold",
+        "Playful",
+        "Educational",
+        "Minimal",
+        "Inspirational",
+    ]
+    use_logo_in_prompt: bool = False
+
+
 class QuestionnaireResponse(BaseModel):
     """Questionnaire record returned from the database."""
 
@@ -114,12 +168,28 @@ class QuestionnaireResponse(BaseModel):
     id: int
     user_id: int
     brand_name: str | None = None
+    company_name: str | None = None
+    industry: str | None = None
     brand_description: str | None = None
+    brand_tone: str | None = None
     target_audience: str | None = None
     video_style: str | None = None
+    logo_url: str | None = None
+    logo_path: str | None = None
+    use_logo_in_prompt: bool = False
     additional_info: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class BrandProfileResponse(QuestionnaireResponse):
+    """Brand Profile response using the compatibility questionnaire row."""
+
+
+class UploadResponse(BaseModel):
+    """Response for uploaded user-owned media."""
+
+    url: str
 
 
 class SocialAccountRequest(BaseModel):
@@ -268,6 +338,7 @@ class ResetPasswordRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     """Fields a user may update on their own profile."""
 
+    email: EmailStr | None = None
     username: str | None = Field(default=None, min_length=3, max_length=100)
     full_name: str | None = Field(default=None, max_length=255)
     company_name: str | None = Field(default=None, max_length=255)

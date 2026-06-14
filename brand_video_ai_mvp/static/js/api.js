@@ -5,10 +5,12 @@
     return endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   }
 
-  function getAuthHeaders(requireAuth) {
-    const headers = {
-      'Content-Type': 'application/json'
-    };
+  function getAuthHeaders(requireAuth, isFormData = false) {
+    const headers = {};
+
+    if (!isFormData) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     if (requireAuth) {
       const token = window.getToken ? window.getToken() : localStorage.getItem('access_token');
@@ -40,10 +42,11 @@
 
   async function apiFetch(endpoint, options = {}, requireAuth = true) {
     const url = `${API_BASE_URL}${normalizeEndpoint(endpoint)}`;
+    const isFormData = options.body instanceof FormData;
     const response = await fetch(url, {
       ...options,
       headers: {
-        ...getAuthHeaders(requireAuth),
+        ...getAuthHeaders(requireAuth, isFormData),
         ...(options.headers || {})
       }
     });
@@ -143,8 +146,17 @@
 
   async function updateProfile(profileData) {
     return apiFetch('/api/profile', {
-      method: 'PATCH',
+      method: 'PUT',
       body: JSON.stringify(profileData)
+    }, true);
+  }
+
+  async function uploadAvatar(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiFetch('/api/profile/avatar', {
+      method: 'POST',
+      body: formData
     }, true);
   }
 
@@ -175,6 +187,26 @@
       '/api/questionnaires/me',
       '/api/questionnaires'
     ], { method: 'GET' }, true);
+  }
+
+  async function saveBrandProfile(profileData) {
+    return apiFetch('/api/brand-profile', {
+      method: 'POST',
+      body: JSON.stringify(profileData)
+    }, true);
+  }
+
+  async function getBrandProfile() {
+    return apiFetch('/api/brand-profile', { method: 'GET' }, true);
+  }
+
+  async function uploadBrandLogo(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiFetch('/api/brand-profile/logo', {
+      method: 'POST',
+      body: formData
+    }, true);
   }
 
   async function listSocialAccounts() {
@@ -302,9 +334,13 @@
     resetPassword,
     getProfile,
     updateProfile,
+    uploadAvatar,
     changePassword,
     saveQuestionnaire,
     getQuestionnaire,
+    saveBrandProfile,
+    getBrandProfile,
+    uploadBrandLogo,
     listSocialAccounts,
     addSocialAccount,
     connectYouTube,

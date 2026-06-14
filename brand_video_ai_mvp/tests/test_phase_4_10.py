@@ -25,6 +25,7 @@ def client(tmp_path, monkeypatch) -> Generator[TestClient, None, None]:
 
     from app import database
     from app.database import Base, get_db
+    from app import main
     from app.main import app
     from app import models  # noqa: F401
 
@@ -32,6 +33,9 @@ def client(tmp_path, monkeypatch) -> Generator[TestClient, None, None]:
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=Session)
     Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(database, "SessionLocal", TestingSessionLocal)
+    upload_static_dir = tmp_path / "static"
+    upload_static_dir.mkdir()
+    monkeypatch.setattr(main, "STATIC_DIR", upload_static_dir)
 
     def override_get_db() -> Generator[Session, None, None]:
         db = TestingSessionLocal()
@@ -215,14 +219,24 @@ def test_profile_get_update_and_change_password(client):
 
     profile = client.get("/api/profile", headers=headers)
     assert profile.status_code == 200
+    assert profile.json()["email"] == "profile@example.com"
 
-    updated = client.patch(
+    updated = client.put(
         "/api/profile",
         headers=headers,
-        json={"username": "profileuser2", "full_name": "Profile User", "company_name": "Acme", "avatar_url": ""},
+        json={
+            "email": "profile-updated@example.com",
+            "username": "profileuser2",
+            "full_name": "Profile User",
+            "company_name": "Acme",
+        },
     )
     assert updated.status_code == 200
+    assert updated.json()["email"] == "profile-updated@example.com"
     assert updated.json()["username"] == "profileuser2"
+    assert updated.json()["display_name"] == "Profile User"
+    assert updated.json()["display_company_name"] == "Acme"
+    assert updated.json()["email_verified"] is False
 
     changed = client.post(
         "/api/profile/change-password",
@@ -234,7 +248,174 @@ def test_profile_get_update_and_change_password(client):
         },
     )
     assert changed.status_code == 200
-    assert login(client, "profile@example.com", "Changed1!")["access_token"]
+    assert client.post("/api/auth/login", json={"email": "profile@example.com", "password": "Changed1!"}).status_code == 401
+    assert login(client, "profile-updated@example.com", "Changed1!")["access_token"]
+
+
+def test_profile_update_rejects_duplicate_email(client):
+    first = register(client, "first-profile@example.com", "firstprofile")
+    register(client, "second-profile@example.com", "secondprofile")
+
+    response = client.put(
+        "/api/profile",
+        headers=auth_headers(first["access_token"]),
+        json={"email": "second-profile@example.com"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "EMAIL_TAKEN"
+
+
+def test_brand_profile_requires_login(client):
+    assert client.get("/api/brand-profile").status_code == 401
+    assert client.post(
+        "/api/brand-profile",
+        json={
+            "company_name": "No Auth Co",
+            "industry": "Retail",
+            "brand_description": "No auth",
+            "brand_tone": "Friendly",
+            "use_logo_in_prompt": False,
+        },
+    ).status_code == 401
+
+
+def test_brand_profile_create_update_and_user_scope(client):
+    first = register(client, "brand-one@example.com", "brandone")
+    second = register(client, "brand-two@example.com", "brandtwo")
+    first_headers = auth_headers(first["access_token"])
+    second_headers = auth_headers(second["access_token"])
+
+    created = client.post(
+        "/api/brand-profile",
+        headers=first_headers,
+        json={
+            "company_name": "Luna Bloom",
+            "industry": "Jewelry",
+            "brand_description": "Modern sustainable jewelry",
+            "brand_tone": "Luxury",
+            "use_logo_in_prompt": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["company_name"] == "Luna Bloom"
+    assert body["brand_name"] == "Luna Bloom"
+    assert body["industry"] == "Jewelry"
+    assert body["brand_tone"] == "Luxury"
+    assert body["use_logo_in_prompt"] is False
+
+    second_get = client.get("/api/brand-profile", headers=second_headers)
+    assert second_get.status_code == 200
+    assert second_get.json() is None
+
+    updated = client.put(
+        "/api/brand-profile",
+        headers=first_headers,
+        json={
+            "company_name": "Luna Bloom Studio",
+            "industry": "Luxury Retail",
+            "brand_description": "Premium jewelry and styling",
+            "brand_tone": "Professional",
+            "use_logo_in_prompt": False,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    updated_body = updated.json()
+    assert updated_body["id"] == body["id"]
+    assert updated_body["company_name"] == "Luna Bloom Studio"
+    assert updated_body["video_style"] == "Professional"
+
+    first_get = client.get("/api/brand-profile", headers=first_headers)
+    assert first_get.status_code == 200
+    assert first_get.json()["company_name"] == "Luna Bloom Studio"
+
+
+def test_brand_profile_logo_upload_accepts_images_only_and_enables_logo_prompt(client):
+    token = register(client, "logo@example.com", "logouser")["access_token"]
+    headers = auth_headers(token)
+
+    created = client.post(
+        "/api/brand-profile",
+        headers=headers,
+        json={
+            "company_name": "Logo Co",
+            "industry": "Education",
+            "brand_description": "Teaches founders",
+            "brand_tone": "Educational",
+            "use_logo_in_prompt": False,
+        },
+    )
+    assert created.status_code == 201
+
+    rejected = client.post(
+        "/api/brand-profile/logo",
+        headers=headers,
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error_code"] == "INVALID_IMAGE_TYPE"
+
+    uploaded = client.post(
+        "/api/brand-profile/logo",
+        headers=headers,
+        files={"file": ("logo.png", b"\x89PNG\r\n\x1a\nfake", "image/png")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert "/brand-logo-" in uploaded.json()["logo_url"]
+    assert uploaded.json()["logo_url"].endswith(".png")
+
+    updated = client.put(
+        "/api/brand-profile",
+        headers=headers,
+        json={
+            "company_name": "Logo Co",
+            "industry": "Education",
+            "brand_description": "Teaches founders",
+            "brand_tone": "Educational",
+            "use_logo_in_prompt": True,
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["use_logo_in_prompt"] is True
+
+
+def test_profile_avatar_upload_accepts_images_only(client):
+    token = register(client, "avatar@example.com", "avataruser")["access_token"]
+    headers = auth_headers(token)
+
+    rejected = client.post(
+        "/api/profile/avatar",
+        headers=headers,
+        files={"file": ("avatar.gif", b"gif", "image/gif")},
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error_code"] == "INVALID_IMAGE_TYPE"
+
+    uploaded = client.post(
+        "/api/profile/avatar",
+        headers=headers,
+        files={"file": ("avatar.webp", b"webp", "image/webp")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    first_url = uploaded.json()["url"]
+    assert "/avatar-" in first_url
+    assert first_url.endswith(".webp")
+
+    uploaded_again = client.post(
+        "/api/profile/avatar",
+        headers=headers,
+        files={"file": ("avatar.webp", b"new-webp", "image/webp")},
+    )
+    assert uploaded_again.status_code == 200, uploaded_again.text
+    second_url = uploaded_again.json()["url"]
+    assert second_url != first_url
+    assert "/avatar-" in second_url
+    assert second_url.endswith(".webp")
+
+    profile = client.get("/api/profile", headers=headers)
+    assert profile.status_code == 200
+    assert profile.json()["avatar_url"] == second_url
 
 
 def test_admin_protection_metrics_and_system_prompts(client):

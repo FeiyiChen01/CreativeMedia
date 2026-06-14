@@ -57,6 +57,37 @@
       .replace(/'/g, '&#039;');
   }
 
+  function renderImagePreview(containerId, imageUrl, fallbackText) {
+    const container = $(containerId);
+    if (!container) return;
+    if (imageUrl) {
+      container.innerHTML = `<img src="${escapeHtml(imageUrl)}" alt="" class="w-full h-full object-cover">`;
+    } else {
+      container.textContent = fallbackText;
+    }
+  }
+
+  function renderAvatar(containerId, imageUrl, displayName) {
+    renderImagePreview(containerId, imageUrl, (displayName || 'U').charAt(0).toUpperCase());
+  }
+
+  async function refreshProfileState() {
+    const user = await window.Api.getProfile();
+    window.authState.user = user;
+    localStorage.setItem('current_user', JSON.stringify(user));
+    renderProfile(user);
+    hydrateUserInterface();
+    return user;
+  }
+
+  function renderBrandLogoPreview(logoUrl) {
+    const wrapper = $('brand-logo-preview-wrapper');
+    const image = $('brand-logo-preview');
+    if (wrapper) wrapper.classList.toggle('hidden', !logoUrl);
+    if (image) image.src = logoUrl || '';
+    setText('preview-logo-status', logoUrl ? '已上传' : '未上传');
+  }
+
   function showPage(pageId) {
     ['page-auth', 'page-questionnaire', 'page-main'].forEach((id) => {
       const page = $(id);
@@ -116,12 +147,13 @@
   function showQuestionnairePage(isEditing = false) {
     showPage('page-questionnaire');
     clearError('questionnaire-error');
+    clearSuccess('questionnaire-success');
     prefillQuestionnaireForm();
     updateQuestionnairePreview();
 
     if (isEditing) {
       const title = document.querySelector('#page-questionnaire h2');
-      if (title) title.textContent = '编辑你的品牌问卷';
+      if (title) title.textContent = 'Edit your Brand Profile';
     }
   }
 
@@ -131,7 +163,7 @@
     renderQuestionnaireSummary();
     loadSocialAccounts();
     loadYouTubePublishingData();
-    switchTab('studio');
+    switchTab('dashboard');
   }
 
   function switchAuthTab(type) {
@@ -182,7 +214,7 @@
     }
 
     try {
-      const questionnaire = await window.Api.getQuestionnaire();
+      const questionnaire = await window.Api.getBrandProfile();
       if (questionnaire && questionnaire.id) {
         window.setQuestionnaire(questionnaire);
         showMainPage();
@@ -357,29 +389,24 @@
   function getQuestionnaireFormPayload() {
     const form = $('questionnaire-form');
     const data = getFormData(form);
-    const selectedStyle = String(data.video_style || '').trim();
-    const customStyle = String(data.custom_video_style || '').trim();
-    const finalStyle = selectedStyle === '其他' && customStyle ? customStyle : selectedStyle;
 
     return {
-      brand_name: String(data.brand_name || '').trim(),
+      company_name: String(data.company_name || '').trim(),
+      industry: String(data.industry || '').trim(),
       brand_description: String(data.brand_description || '').trim(),
-      target_audience: String(data.target_audience || '').trim(),
-      video_style: finalStyle,
-      additional_info: {
-        source: 'frontend_onboarding',
-        preferred_language: 'zh'
-      }
+      brand_tone: String(data.brand_tone || '').trim(),
+      use_logo_in_prompt: Boolean($('use-logo-in-prompt')?.checked)
     };
   }
 
   async function handleQuestionnaireSubmit(event) {
     event.preventDefault();
     clearError('questionnaire-error');
+    clearSuccess('questionnaire-success');
 
     const payload = getQuestionnaireFormPayload();
 
-    if (!payload.brand_name || !payload.brand_description || !payload.target_audience || !payload.video_style) {
+    if (!payload.company_name || !payload.industry || !payload.brand_description || !payload.brand_tone) {
       showError('questionnaire-error', 'Please complete all required fields before continuing.');
       return;
     }
@@ -388,11 +415,36 @@
     setButtonLoading(button, true, 'Saving profile...');
 
     try {
-      const questionnaire = await window.Api.saveQuestionnaire(payload);
+      const questionnaire = await window.Api.saveBrandProfile(payload);
       window.setQuestionnaire(questionnaire);
+      showSuccess('questionnaire-success', 'Brand Profile saved.');
       showMainPage();
     } catch (error) {
-      showError('questionnaire-error', error.message || 'Failed to save questionnaire.');
+      showError('questionnaire-error', error.message || 'Failed to save Brand Profile.');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function handleBrandLogoUpload() {
+    clearError('questionnaire-error');
+    clearSuccess('questionnaire-success');
+    const file = $('brand-logo-file')?.files?.[0];
+    if (!file) {
+      showError('questionnaire-error', 'Please choose a logo image first.');
+      return;
+    }
+
+    const button = $('brand-logo-upload-btn');
+    setButtonLoading(button, true, 'Uploading logo...');
+    try {
+      const profile = await window.Api.uploadBrandLogo(file);
+      window.setQuestionnaire(profile);
+      prefillQuestionnaireForm();
+      updateQuestionnairePreview();
+      showSuccess('questionnaire-success', 'Logo uploaded.');
+    } catch (error) {
+      showError('questionnaire-error', error.message || 'Failed to upload logo.');
     } finally {
       setButtonLoading(button, false);
     }
@@ -413,22 +465,22 @@
   }
 
   function updateQuestionnairePreview() {
-    const brandName = $('brand-name')?.value.trim() || '未填写品牌名称';
+    const brandName = $('brand-name')?.value.trim() || '未填写公司名称';
+    const industry = $('brand-industry')?.value.trim() || '未填写';
     const brandDescription = $('brand-description')?.value.trim() || '品牌描述会显示在这里。';
-    const targetAudience = $('target-audience')?.value.trim() || '未填写';
-    const selectedStyle = $('video-style')?.value || '';
-    const customStyle = $('custom-video-style')?.value.trim() || '';
-    const videoStyle = selectedStyle === '其他' && customStyle ? customStyle : selectedStyle || '未选择';
+    const videoStyle = $('brand-tone')?.value || '未选择';
+    const logoStatus = $('brand-logo-preview')?.getAttribute('src') ? '已上传' : '未上传';
 
     setText('preview-brand-name', brandName);
+    setText('preview-industry', industry);
     setText('preview-brand-description', brandDescription);
-    setText('preview-target-audience', targetAudience);
+    setText('preview-logo-status', logoStatus);
     setText('preview-video-style', videoStyle);
 
     const requiredValues = [
       $('brand-name')?.value.trim(),
+      $('brand-industry')?.value.trim(),
       $('brand-description')?.value.trim(),
-      $('target-audience')?.value.trim(),
       videoStyle !== '未选择' ? videoStyle : ''
     ];
     const completed = requiredValues.filter(Boolean).length;
@@ -443,35 +495,22 @@
     const questionnaire = window.authState.questionnaire || window.getQuestionnaireFromStorage?.();
     if (!questionnaire) return;
 
-    if ($('brand-name')) $('brand-name').value = questionnaire.brand_name || '';
+    if ($('brand-name')) $('brand-name').value = questionnaire.company_name || questionnaire.brand_name || '';
+    if ($('brand-industry')) $('brand-industry').value = questionnaire.industry || questionnaire.target_audience || '';
     if ($('brand-description')) $('brand-description').value = questionnaire.brand_description || '';
-    if ($('target-audience')) $('target-audience').value = questionnaire.target_audience || '';
-
-    const styleSelect = $('video-style');
-    const customStyleWrapper = $('custom-style-wrapper');
-    const customStyleInput = $('custom-video-style');
-    const knownStyles = ['专业商务风', '创意潮流风', '温暖人文风', '科技未来风'];
-    const style = questionnaire.video_style || '';
-
-    if (styleSelect) {
-      if (knownStyles.includes(style)) {
-        styleSelect.value = style;
-        if (customStyleWrapper) customStyleWrapper.classList.add('hidden');
-      } else if (style) {
-        styleSelect.value = '其他';
-        if (customStyleWrapper) customStyleWrapper.classList.remove('hidden');
-        if (customStyleInput) customStyleInput.value = style;
-      }
-    }
+    if ($('brand-tone')) $('brand-tone').value = questionnaire.brand_tone || questionnaire.video_style || '';
+    if ($('use-logo-in-prompt')) $('use-logo-in-prompt').checked = Boolean(questionnaire.use_logo_in_prompt);
+    renderBrandLogoPreview(questionnaire.logo_url || '');
   }
 
   function hydrateUserInterface() {
     const user = window.authState.user || window.getCurrentUser?.();
     if (!user) return;
 
-    setText('sidebar-username', user.username || 'User');
-    setText('sidebar-email', user.email || '');
-    setText('user-avatar-letter', (user.username || user.email || 'U').charAt(0).toUpperCase());
+    const displayName = user.display_name || user.full_name || user.company_name || user.username || 'User';
+    setText('sidebar-username', displayName);
+    setText('sidebar-company', user.display_company_name || (user.full_name && user.company_name ? user.company_name : 'Profile / Account Settings'));
+    renderAvatar('user-avatar-letter', user.avatar_url, displayName);
     $('nav-admin')?.classList.toggle('hidden', user.role !== 'admin');
   }
 
@@ -479,12 +518,12 @@
     const questionnaire = window.authState.questionnaire;
     if (!questionnaire) return;
 
-    setText('studio-brand-name', questionnaire.brand_name || '-');
-    setText('studio-video-style', questionnaire.video_style || '-');
-    setText('studio-target-audience', questionnaire.target_audience || '-');
+    setText('studio-brand-name', questionnaire.company_name || questionnaire.brand_name || '-');
+    setText('studio-video-style', questionnaire.brand_tone || questionnaire.video_style || '-');
+    setText('studio-target-audience', questionnaire.industry || questionnaire.target_audience || '-');
     setText('studio-brand-description', questionnaire.brand_description || '-');
 
-    setText('dashboard-summary', `${questionnaire.brand_name || 'Your brand'} targets ${questionnaire.target_audience || 'your audience'} with a ${questionnaire.video_style || 'custom'} video style. ${questionnaire.brand_description || ''}`);
+    setText('dashboard-summary', `${questionnaire.company_name || questionnaire.brand_name || 'Your company'} operates in ${questionnaire.industry || questionnaire.target_audience || 'your industry'} with a ${questionnaire.brand_tone || questionnaire.video_style || 'custom'} brand tone. ${questionnaire.brand_description || ''}`);
   }
 
   function switchTab(tabId) {
@@ -524,9 +563,9 @@
     const style = questionnaire.video_style || 'cinematic TikTok short-form video';
 
     return {
-      brand_name: questionnaire.brand_name || 'Unknown Brand',
-      industry: style,
-      target_audience: questionnaire.target_audience || 'general audience',
+      brand_name: questionnaire.company_name || questionnaire.brand_name || 'Unknown Brand',
+      industry: questionnaire.industry || style,
+      target_audience: questionnaire.industry || questionnaire.target_audience || 'general audience',
       brand_keywords: [style, 'brand storytelling', 'short video'],
       promotion_theme: description || 'brand awareness campaign',
       video_length: '15-30 seconds',
@@ -1039,7 +1078,7 @@
     if ($('profile-email')) $('profile-email').value = user.email || '';
     if ($('profile-full-name')) $('profile-full-name').value = user.full_name || '';
     if ($('profile-company-name')) $('profile-company-name').value = user.company_name || '';
-    if ($('profile-avatar-url')) $('profile-avatar-url').value = user.avatar_url || '';
+    renderAvatar('profile-avatar-preview', user.avatar_url, user.display_name || user.username || 'U');
 
     const verifiedHtml = user.email_verified
       ? '<span class="text-brand-teal font-bold"><i class="fa-solid fa-circle-check mr-2"></i>Verified</span>'
@@ -1075,23 +1114,53 @@
 
     const data = getFormData(event.currentTarget);
     const payload = {
+      email: String(data.email || '').trim().toLowerCase(),
       username: String(data.username || '').trim(),
       full_name: String(data.full_name || '').trim() || null,
-      company_name: String(data.company_name || '').trim() || null,
-      avatar_url: String(data.avatar_url || '').trim() || null
+      company_name: String(data.company_name || '').trim() || null
     };
+
+    if (!validateEmail(payload.email)) {
+      showError('profile-error', 'Please enter a valid email address.');
+      return;
+    }
 
     const button = $('profile-submit-btn');
     setButtonLoading(button, true, 'Saving profile...');
     try {
-      const user = await window.Api.updateProfile(payload);
-      window.authState.user = user;
-      localStorage.setItem('current_user', JSON.stringify(user));
-      renderProfile(user);
-      hydrateUserInterface();
+      await window.Api.updateProfile(payload);
+      const avatarFile = $('profile-avatar-file')?.files?.[0];
+      if (avatarFile) {
+        await window.Api.uploadAvatar(avatarFile);
+        if ($('profile-avatar-file')) $('profile-avatar-file').value = '';
+      }
+      await refreshProfileState();
       showSuccess('profile-success', 'Profile saved.');
     } catch (error) {
       showError('profile-error', error.message || 'Failed to save profile.');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function handleAvatarUpload() {
+    clearError('profile-error');
+    clearSuccess('profile-success');
+    const file = $('profile-avatar-file')?.files?.[0];
+    if (!file) {
+      showError('profile-error', 'Please choose an avatar image first.');
+      return;
+    }
+
+    const button = $('profile-avatar-upload-btn');
+    setButtonLoading(button, true, 'Uploading avatar...');
+    try {
+      await window.Api.uploadAvatar(file);
+      if ($('profile-avatar-file')) $('profile-avatar-file').value = '';
+      await refreshProfileState();
+      showSuccess('profile-success', 'Avatar uploaded.');
+    } catch (error) {
+      showError('profile-error', error.message || 'Failed to upload avatar.');
     } finally {
       setButtonLoading(button, false);
     }
@@ -1321,12 +1390,15 @@
       field.addEventListener('change', updateQuestionnairePreview);
     });
 
-    $('custom-video-style')?.addEventListener('input', updateQuestionnairePreview);
-
-    $('video-style')?.addEventListener('change', () => {
-      const isCustom = $('video-style')?.value === '其他';
-      $('custom-style-wrapper')?.classList.toggle('hidden', !isCustom);
+    $('brand-logo-file')?.addEventListener('change', () => {
+      const file = $('brand-logo-file')?.files?.[0];
+      if (file) renderBrandLogoPreview(URL.createObjectURL(file));
       updateQuestionnairePreview();
+    });
+
+    $('profile-avatar-file')?.addEventListener('change', () => {
+      const file = $('profile-avatar-file')?.files?.[0];
+      if (file) renderAvatar('profile-avatar-preview', URL.createObjectURL(file), window.authState.user?.display_name || 'U');
     });
   }
 
@@ -1349,6 +1421,8 @@
   window.handleYouTubeConnect = handleYouTubeConnect;
   window.handleYouTubeDisconnect = handleYouTubeDisconnect;
   window.handleResendVerification = handleResendVerification;
+  window.handleBrandLogoUpload = handleBrandLogoUpload;
+  window.handleAvatarUpload = handleAvatarUpload;
   window.handleAdminUserAction = handleAdminUserAction;
   window.loadAdminDashboard = loadAdminDashboard;
   window.resetStudioState = resetStudioState;

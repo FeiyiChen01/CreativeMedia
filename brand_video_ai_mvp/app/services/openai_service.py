@@ -16,7 +16,7 @@ except ImportError:  # Allows mock mode even before dependencies are installed.
     OpenAI = None  # type: ignore[assignment]
 from pydantic import BaseModel, ValidationError
 
-from app.models import (
+from app.schemas import (
     BrandQuestionnaire,
     SceneOutline,
     ScenePrompt,

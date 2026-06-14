@@ -1,6 +1,6 @@
 # Brand Video AI MVP
 
-AI brand short-video generation SaaS MVP. Users register, verify email, save a brand questionnaire, generate an AI video outline, review it, create Sora-ready scene prompts, and queue async video generation jobs.
+AI brand short-video generation SaaS MVP. Users register, verify email, save a Brand Profile / Company Profile, generate an AI video outline, review it, create Sora-ready scene prompts, queue async video generation jobs, and publish finished assets to YouTube Shorts.
 
 The current stack is:
 
@@ -9,20 +9,25 @@ The current stack is:
 - JWT auth
 - Email verification and password reset
 - Profile and account settings
+- Brand Profile / Company Profile with logo upload
 - Admin dashboard
 - Async video generation jobs
 - YouTube OAuth connection and Shorts publishing through YouTube Data API v3
-- SQLAlchemy models with SQLite locally and Neon PostgreSQL on Render
+- SQLAlchemy ORM models with Pydantic API schemas
+- Alembic migrations with SQLite locally and Neon PostgreSQL on Render
 
 ## Current Architecture
 
 - Local development uses SQLite, defaulting to `sqlite:///./test.db`.
 - Deployment uses a Render Web Service plus Neon PostgreSQL.
 - DBeaver can inspect the Neon database with the same connection details used by Render.
+- FastAPI route modules live under `app/routers/`.
+- Shared runtime helpers live in `app/core.py`.
+- Database tables are defined in `app/models.py`.
+- API request/response schemas are defined in `app/schemas.py`.
 - Video storage is local MVP storage through `app/services/storage_service.py`.
 - Local video storage is fine for local development and demos, but Render local filesystem storage is not durable. Production video files should move to S3, Cloudflare R2, Supabase Storage, or another persistent object store.
-
-The app currently creates tables with `Base.metadata.create_all(bind=engine)` and includes a small SQLite compatibility helper for local column additions. A future production hardening pass should add Alembic migrations.
+- Alembic tracks database schema changes. The app still calls `init_db()` on startup for local MVP convenience, but deployed databases should be upgraded with `alembic upgrade head`.
 
 ## Environment Variables
 
@@ -88,6 +93,12 @@ cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
+Initialize or upgrade the local database schema:
+
+```bash
+alembic upgrade head
+```
+
 Open:
 
 ```text
@@ -108,6 +119,15 @@ Run tests:
 pytest -q
 ```
 
+Tests are split by feature area:
+
+- `tests/test_auth.py`
+- `tests/test_profile.py`
+- `tests/test_brand_profile.py`
+- `tests/test_generation.py`
+- `tests/test_youtube.py`
+- `tests/test_admin.py`
+
 ## Render + Neon Setup
 
 1. Create a Neon PostgreSQL database.
@@ -122,7 +142,7 @@ brand_video_ai_mvp
 5. Set Build Command:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt && alembic upgrade head
 ```
 
 6. Set Start Command:
@@ -202,7 +222,13 @@ The app uses the server-side OAuth web flow. The frontend receives only an autho
 
 - `POST /api/auth/register`
 - `POST /api/auth/login`
-- `POST /api/questionnaire`
+- `GET /api/profile`
+- `PUT /api/profile`
+- `POST /api/profile/avatar`
+- `GET /api/brand-profile`
+- `POST /api/brand-profile`
+- `PUT /api/brand-profile`
+- `POST /api/brand-profile/logo`
 - `POST /api/generate-outline`
 - `POST /api/generate-prompts`
 - `POST /api/video-jobs`
@@ -226,7 +252,20 @@ Generation creates traceable records:
 
 ## Local Database Notes
 
-The app still uses `Base.metadata.create_all(bind=engine)` instead of Alembic. New tables are created automatically. Existing local SQLite databases receive simple compatibility columns for `social_accounts`, but if an older `test.db` behaves oddly during development, delete the local `test.db` or migrate it manually. Do not delete production data.
+Alembic is the source of truth for database schema changes:
+
+```bash
+alembic upgrade head
+```
+
+The first migration creates the current MVP schema for empty databases. If a database already has the `users` table, the initial migration treats it as an existing baseline and records the Alembic version without trying to recreate tables. Future field/table changes should be added as new Alembic revisions instead of relying on deleting `test.db`. The app still calls `Base.metadata.create_all(bind=engine)` on startup for local MVP convenience and keeps a small SQLite compatibility helper for older local databases. Do not delete production data.
+
+To create a future migration after changing SQLAlchemy models:
+
+```bash
+alembic revision --autogenerate -m "describe schema change"
+alembic upgrade head
+```
 
 ## Testing
 

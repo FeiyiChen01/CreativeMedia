@@ -6,7 +6,10 @@
     promptPackage: null,
     generatedPromptPackageId: null,
     generatedVideos: 0,
-    socialAccounts: []
+    socialAccounts: [],
+    videoAssets: [],
+    publishingJobs: [],
+    pendingYouTubeStatus: null
   };
 
   function $(id) {
@@ -127,6 +130,7 @@
     hydrateUserInterface();
     renderQuestionnaireSummary();
     loadSocialAccounts();
+    loadYouTubePublishingData();
     switchTab('studio');
   }
 
@@ -504,6 +508,9 @@
     if (tabId === 'social') {
       loadSocialAccounts();
     }
+    if (tabId === 'studio') {
+      loadYouTubePublishingData();
+    }
     if (tabId === 'profile') {
       loadProfile();
     }
@@ -785,9 +792,12 @@
     const accounts = studioState.socialAccounts || [];
     setText('metric-socials', String(accounts.length));
 
+    const connectedYouTube = getConnectedYouTubeAccount();
     setText('ig-status', accounts.some((item) => item.platform === 'instagram') ? '已绑定' : '待绑定');
-    setText('yt-status', accounts.some((item) => item.platform === 'youtube') ? '已绑定' : '待绑定');
+    setText('yt-status', connectedYouTube ? '已连接' : (accounts.some((item) => item.platform === 'youtube') ? '已绑定' : '待绑定'));
     setText('tt-status', accounts.some((item) => item.platform === 'tiktok') ? '已绑定' : '待绑定');
+    renderYouTubeConnection();
+    renderYouTubePublishConnection();
 
     if (!accounts.length) {
       setHtml('social-accounts-list', '<p class="text-sm text-slate-500">No accounts linked yet.</p>');
@@ -798,13 +808,198 @@
       <div class="social-account-card flex items-center justify-between gap-4">
         <div>
           <div class="text-sm font-bold text-white capitalize">${escapeHtml(account.platform)}</div>
-          <div class="text-xs text-slate-500">${escapeHtml(account.account_handle || account.account_url || '')}</div>
+          <div class="text-xs text-slate-500">${escapeHtml(account.platform_account_name || account.account_handle || account.account_url || '')}</div>
+          <div class="text-[10px] text-slate-600 mt-1">Status: ${escapeHtml(account.connection_status || 'manual')}</div>
         </div>
-        <i class="fa-solid fa-circle-check text-brand-teal"></i>
+        <i class="fa-solid ${account.connection_status === 'connected' ? 'fa-circle-check text-brand-teal' : 'fa-link text-brand-purple'}"></i>
       </div>
     `).join('');
 
     setHtml('social-accounts-list', html);
+  }
+
+  function getConnectedYouTubeAccount() {
+    return (studioState.socialAccounts || []).find((account) => account.platform === 'youtube' && account.connection_status === 'connected') || null;
+  }
+
+  function renderYouTubeConnection() {
+    const account = getConnectedYouTubeAccount();
+    const connectButton = $('youtube-connect-btn');
+    const disconnectButton = $('youtube-disconnect-btn');
+    if (connectButton) connectButton.classList.toggle('hidden', Boolean(account));
+    if (disconnectButton) disconnectButton.classList.toggle('hidden', !account);
+
+    if (account) {
+      setHtml('youtube-account-summary', `
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="text-sm font-bold text-white">${escapeHtml(account.platform_account_name || account.account_handle || 'YouTube Channel')}</div>
+            <div class="text-xs text-slate-500 mt-1">${escapeHtml(account.account_url || '')}</div>
+            <div class="text-[10px] text-brand-teal mt-2">Connected${account.last_synced_at ? ` · ${escapeHtml(account.last_synced_at)}` : ''}</div>
+          </div>
+          <i class="fa-solid fa-circle-check text-brand-teal"></i>
+        </div>
+      `);
+    } else {
+      setText('youtube-account-summary', 'No connected YouTube account.');
+    }
+  }
+
+  function renderYouTubePublishConnection() {
+    const account = getConnectedYouTubeAccount();
+    const statusText = account ? `Connected: ${account.platform_account_name || account.account_handle || 'YouTube'}` : 'Connect YouTube first';
+    setText('youtube-publish-connection-status', statusText);
+  }
+
+  async function handleYouTubeConnect() {
+    clearError('youtube-connect-error');
+    clearSuccess('youtube-connect-message');
+    const button = $('youtube-connect-btn');
+    setButtonLoading(button, true, 'Connecting...');
+    try {
+      const response = await window.Api.connectYouTube();
+      window.location.href = response.auth_url;
+    } catch (error) {
+      showError('youtube-connect-error', error.message || 'Could not start YouTube OAuth.');
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function handleYouTubeDisconnect() {
+    clearError('youtube-connect-error');
+    clearSuccess('youtube-connect-message');
+    const account = getConnectedYouTubeAccount();
+    if (!account) return;
+
+    const button = $('youtube-disconnect-btn');
+    setButtonLoading(button, true, 'Disconnecting...');
+    try {
+      await window.Api.deleteSocialAccount(account.id);
+      showSuccess('youtube-connect-message', 'YouTube account disconnected.');
+      await loadSocialAccounts();
+    } catch (error) {
+      showError('youtube-connect-error', error.message || 'Failed to disconnect YouTube.');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function loadYouTubePublishingData() {
+    if (!window.authState.isAuthenticated) return;
+    try {
+      const [assets, jobs] = await Promise.all([
+        window.Api.listVideoAssets(),
+        window.Api.listPublishingJobs()
+      ]);
+      studioState.videoAssets = assets || [];
+      studioState.publishingJobs = jobs || [];
+      renderVideoAssetOptions();
+      renderPublishingJobs();
+      renderYouTubePublishConnection();
+    } catch (error) {
+      console.warn('Failed to load YouTube publishing data.', error);
+    }
+  }
+
+  function renderVideoAssetOptions() {
+    const assets = studioState.videoAssets || [];
+    if (!assets.length) {
+      setHtml('youtube-video-asset', '<option value="">No generated video assets yet</option>');
+      return;
+    }
+
+    setHtml('youtube-video-asset', assets.map((asset) => {
+      const label = `#${asset.id} · Scene ${asset.scene_number || '-'} · ${asset.status || 'unknown'}${asset.file_path ? '' : ' · no file'}`;
+      return `<option value="${Number(asset.id)}">${escapeHtml(label)}</option>`;
+    }).join(''));
+  }
+
+  function renderPublishingJobs() {
+    const jobs = studioState.publishingJobs || [];
+    if (!jobs.length) {
+      setHtml('publishing-jobs-list', '<p class="text-sm text-slate-500">No publishing jobs yet.</p>');
+      return;
+    }
+
+    const html = jobs.map((job) => {
+      const statusClass = job.status === 'success' ? 'text-brand-teal' : (job.status === 'failed' ? 'text-brand-pink' : 'text-brand-yellow');
+      const link = job.provider_post_url
+        ? `<a href="${escapeHtml(job.provider_post_url)}" target="_blank" rel="noopener" class="text-brand-purple hover:underline">Watch on YouTube</a>`
+        : '';
+      return `
+        <div class="rounded-xl border border-brand-border bg-brand-dark/50 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="text-sm font-bold text-white">${escapeHtml(job.title)}</div>
+              <div class="text-xs ${statusClass} mt-1">${escapeHtml(job.status)} · ${escapeHtml(job.privacy_status)}</div>
+              ${job.error_message ? `<div class="text-xs text-brand-pink mt-2">${escapeHtml(job.error_message)}</div>` : ''}
+              ${link ? `<div class="text-xs mt-2">${link}</div>` : ''}
+            </div>
+            <span class="text-[10px] text-slate-600">#${escapeHtml(job.id)}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+    setHtml('publishing-jobs-list', html);
+  }
+
+  async function handleYouTubePublish(event) {
+    event.preventDefault();
+    clearError('youtube-publish-error');
+    clearSuccess('youtube-publish-success');
+
+    const account = getConnectedYouTubeAccount();
+    if (!account) {
+      showError('youtube-publish-error', 'Please connect YouTube before publishing.');
+      switchTab('social');
+      return;
+    }
+
+    const form = event.currentTarget;
+    const data = getFormData(form);
+    const title = String(data.title || '').trim();
+    const videoAssetId = Number(data.video_asset_id || 0);
+    if (!videoAssetId) {
+      showError('youtube-publish-error', 'Please choose a video asset.');
+      return;
+    }
+    if (!title) {
+      showError('youtube-publish-error', 'Title is required.');
+      return;
+    }
+
+    const tags = String(data.tags || '')
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    const payload = {
+      video_asset_id: videoAssetId,
+      social_account_id: account.id,
+      title,
+      description: String(data.description || '').trim(),
+      tags,
+      privacy_status: String(data.privacy_status || 'private'),
+      contains_synthetic_media: Boolean($('youtube-synthetic')?.checked)
+    };
+
+    const button = $('youtube-publish-submit-btn');
+    setButtonLoading(button, true, 'Uploading...');
+    try {
+      const job = await window.Api.uploadYouTubeShort(payload);
+      if (job.status === 'success' && job.provider_post_url) {
+        showSuccess('youtube-publish-success', `Published successfully: ${job.provider_post_url}`);
+      } else if (job.status === 'failed') {
+        showError('youtube-publish-error', job.error_message || 'Publishing failed.');
+      } else {
+        showSuccess('youtube-publish-success', `Publishing job ${job.id} is ${job.status}.`);
+      }
+      await loadYouTubePublishingData();
+    } catch (error) {
+      showError('youtube-publish-error', error.message || 'Failed to upload YouTube Short.');
+      await loadYouTubePublishingData();
+    } finally {
+      setButtonLoading(button, false);
+    }
   }
 
   async function handleSocialSubmit(event) {
@@ -1076,11 +1271,19 @@
   async function initializeApp() {
     const params = new URLSearchParams(window.location.search);
     const resetToken = params.get('reset_token');
+    const youtubeConnected = params.get('youtube_connected');
     if (resetToken) {
       window.clearAuth();
       showPage('page-auth');
       showResetPasswordForm(resetToken);
       return;
+    }
+    if (youtubeConnected) {
+      studioState.pendingYouTubeStatus = youtubeConnected;
+      params.delete('youtube_connected');
+      const newQuery = params.toString();
+      const newUrl = `${window.location.pathname}${newQuery ? `?${newQuery}` : ''}${window.location.hash || ''}`;
+      window.history.replaceState({}, document.title, newUrl);
     }
 
     await window.initAuth();
@@ -1091,6 +1294,15 @@
     }
 
     await routeAfterAuth(false);
+    if (studioState.pendingYouTubeStatus === 'success') {
+      switchTab('social');
+      showSuccess('youtube-connect-message', 'YouTube connected successfully.');
+      studioState.pendingYouTubeStatus = null;
+    } else if (studioState.pendingYouTubeStatus === 'failed') {
+      switchTab('social');
+      showError('youtube-connect-error', 'YouTube connection failed. Please try again.');
+      studioState.pendingYouTubeStatus = null;
+    }
   }
 
   function bindEvents() {
@@ -1100,6 +1312,7 @@
     $('reset-password-form')?.addEventListener('submit', handleResetPassword);
     $('questionnaire-form')?.addEventListener('submit', handleQuestionnaireSubmit);
     $('social-form')?.addEventListener('submit', handleSocialSubmit);
+    $('youtube-publish-form')?.addEventListener('submit', handleYouTubePublish);
     $('profile-form')?.addEventListener('submit', handleProfileSubmit);
     $('change-password-form')?.addEventListener('submit', handleChangePassword);
 
@@ -1133,6 +1346,8 @@
   window.handleGenerateOutline = handleGenerateOutline;
   window.handleGeneratePrompts = handleGeneratePrompts;
   window.handleGenerateSceneVideo = handleGenerateSceneVideo;
+  window.handleYouTubeConnect = handleYouTubeConnect;
+  window.handleYouTubeDisconnect = handleYouTubeDisconnect;
   window.handleResendVerification = handleResendVerification;
   window.handleAdminUserAction = handleAdminUserAction;
   window.loadAdminDashboard = loadAdminDashboard;

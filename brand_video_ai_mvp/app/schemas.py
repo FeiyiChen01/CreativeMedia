@@ -148,7 +148,68 @@ class SocialAccountResponse(BaseModel):
     platform: str
     account_url: str | None = None
     account_handle: str | None = None
+    platform_user_id: str | None = None
+    platform_account_name: str | None = None
+    connection_status: str = "manual"
+    token_expires_at: datetime | None = None
+    last_synced_at: datetime | None = None
     linked_at: datetime
+    updated_at: datetime | None = None
+
+
+class YouTubeOAuthConnectResponse(BaseModel):
+    """Authorization URL for starting the YouTube OAuth web flow."""
+
+    auth_url: str
+
+
+class YouTubeShortUploadRequest(BaseModel):
+    """Request body for publishing a generated asset to YouTube via videos.insert."""
+
+    video_asset_id: int
+    social_account_id: int
+    title: str = Field(..., min_length=1, max_length=100)
+    description: str | None = None
+    tags: list[str] = Field(default_factory=list, max_length=30)
+    privacy_status: Literal["private", "unlisted", "public"] = "private"
+    contains_synthetic_media: bool = False
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, tags: list[str]) -> list[str]:
+        """Trim tags, remove empties, and keep the request small for YouTube."""
+
+        cleaned: list[str] = []
+        for tag in tags:
+            value = str(tag).strip().lstrip("#")
+            if value and value not in cleaned:
+                cleaned.append(value[:100])
+        return cleaned[:30]
+
+
+class PublishingJobResponse(BaseModel):
+    """Publishing job status returned to the frontend."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    video_asset_id: int
+    social_account_id: int
+    platform: str
+    status: Literal["pending", "running", "success", "failed"]
+    title: str
+    description: str | None = None
+    tags_json: str | None = None
+    privacy_status: Literal["private", "unlisted", "public"]
+    provider_post_id: str | None = None
+    provider_post_url: str | None = None
+    error_message: str | None = None
+    request_json: str | None = None
+    response_json: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class EmailVerificationTokenResponse(BaseModel):

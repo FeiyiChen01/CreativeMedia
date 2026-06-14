@@ -65,6 +65,14 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    oauth_states: Mapped[list["OAuthState"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    publishing_jobs: Mapped[list["PublishingJob"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     email_verification_tokens: Mapped[list["EmailVerificationToken"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
@@ -133,7 +141,7 @@ class Questionnaire(Base):
 
 
 class SocialAccount(Base):
-    """Manual social media account link for one user."""
+    """Manual or OAuth-backed social media account link for one user."""
 
     __tablename__ = "social_accounts"
 
@@ -142,9 +150,41 @@ class SocialAccount(Base):
     platform: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     account_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     account_handle: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    platform_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    platform_account_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    access_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    connection_status: Mapped[str] = mapped_column(String(20), default="manual", server_default="manual", nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
     user: Mapped[User] = relationship(back_populates="social_accounts")
+    publishing_jobs: Mapped[list["PublishingJob"]] = relationship(back_populates="social_account")
+
+
+class OAuthState(Base):
+    """Hashed OAuth state values used to protect callback flows from CSRF."""
+
+    __tablename__ = "oauth_states"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    state_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    return_to: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="oauth_states")
 
 
 class EmailVerificationToken(Base):
@@ -271,6 +311,40 @@ class VideoAsset(Base):
 
     user: Mapped[User] = relationship(back_populates="video_assets")
     generation_job: Mapped[GenerationJob] = relationship(back_populates="video_assets")
+    publishing_jobs: Mapped[list["PublishingJob"]] = relationship(back_populates="video_asset")
+
+
+class PublishingJob(Base):
+    """Track one attempt to publish a generated video to an external platform."""
+
+    __tablename__ = "publishing_jobs"
+    __table_args__ = (
+        CheckConstraint("status in ('pending', 'running', 'success', 'failed')", name="ck_publishing_jobs_status"),
+        CheckConstraint("privacy_status in ('private', 'unlisted', 'public')", name="ck_publishing_jobs_privacy_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    video_asset_id: Mapped[int] = mapped_column(ForeignKey("video_assets.id"), nullable=False, index=True)
+    social_account_id: Mapped[int] = mapped_column(ForeignKey("social_accounts.id"), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(50), default="youtube", server_default="youtube", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    privacy_status: Mapped[str] = mapped_column(String(20), default="private", server_default="private", nullable=False)
+    provider_post_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    provider_post_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship(back_populates="publishing_jobs")
+    video_asset: Mapped[VideoAsset] = relationship(back_populates="publishing_jobs")
+    social_account: Mapped[SocialAccount] = relationship(back_populates="publishing_jobs")
 
 
 class ApiUsageLog(Base):

@@ -188,6 +188,33 @@
     }, true);
   }
 
+  async function connectYouTube() {
+    return apiFetch('/api/oauth/youtube/connect', { method: 'GET' }, true);
+  }
+
+  async function deleteSocialAccount(accountId) {
+    return apiFetch(`/api/social-accounts/${accountId}`, { method: 'DELETE' }, true);
+  }
+
+  async function listVideoAssets() {
+    return apiFetch('/api/video-assets', { method: 'GET' }, true);
+  }
+
+  async function uploadYouTubeShort(payload) {
+    return apiFetch('/api/youtube/shorts/upload', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }, true);
+  }
+
+  async function listPublishingJobs() {
+    return apiFetch('/api/publishing-jobs', { method: 'GET' }, true);
+  }
+
+  async function getPublishingJob(jobId) {
+    return apiFetch(`/api/publishing-jobs/${jobId}`, { method: 'GET' }, true);
+  }
+
   async function generateOutline(questionnairePayload) {
     return apiFetch('/api/generate-outline', {
       method: 'POST',
@@ -280,6 +307,12 @@
     getQuestionnaire,
     listSocialAccounts,
     addSocialAccount,
+    connectYouTube,
+    deleteSocialAccount,
+    listVideoAssets,
+    uploadYouTubeShort,
+    listPublishingJobs,
+    getPublishingJob,
     generateOutline,
     generatePrompts,
     generateSceneVideo,

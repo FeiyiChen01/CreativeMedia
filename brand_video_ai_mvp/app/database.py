@@ -60,6 +60,18 @@ def _add_missing_sqlite_columns() -> None:
             "storage_backend": "VARCHAR(50)",
             "file_size": "INTEGER",
         },
+        "social_accounts": {
+            "platform_user_id": "VARCHAR(255)",
+            "platform_account_name": "VARCHAR(255)",
+            "access_token_encrypted": "TEXT",
+            "refresh_token_encrypted": "TEXT",
+            "token_expires_at": "DATETIME",
+            "scopes": "TEXT",
+            "connection_status": "VARCHAR(20) NOT NULL DEFAULT 'manual'",
+            "last_synced_at": "DATETIME",
+            "metadata_json": "TEXT",
+            "updated_at": "DATETIME",
+        },
     }
 
     with engine.begin() as connection:
